@@ -1,0 +1,9 @@
+vnstock==0.2.9.2.3
+fastapi==0.128.8
+uvicorn[standard]==0.39.0
+requests
+beautifulsoup4
+lxml
+pandas
+packaging
+ipython

@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TraderAI - Chứng Khoán Việt Nam | Gợi Ý Đầu Tư Thông Minh</title>
+  <meta name="description" content="TraderAI - Theo dõi chứng khoán Việt Nam real-time, phân tích kỹ thuật và cơ bản, gợi ý đầu tư long-term & short-term dựa trên AI." />
+  <meta name="keywords" content="chứng khoán, Việt Nam, đầu tư, cổ phiếu, VN-Index, phân tích kỹ thuật, RSI, MACD" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📈</text></svg>" />
+</head>
+<body>
+  <div id="app">
+    <!-- Header -->
+    <header class="header" id="header">
+      <div class="header-inner">
+        <div class="logo">
+          <span class="logo-icon">📈</span>
+          <span class="logo-text">Trader<span class="logo-ai">AI</span></span>
+        </div>
+        <nav class="nav">
+          <a href="#market" class="nav-link active" data-section="market">Thị Trường</a>
+          <a href="#suggestions" class="nav-link" data-section="suggestions">Gợi Ý Đầu Tư</a>
+          <a href="#chart" class="nav-link" data-section="chart">Biểu Đồ</a>
+        </nav>
+        <div class="header-right">
+          <div class="live-indicator">
+            <span class="live-dot"></span>
+            <span>LIVE</span>
+          </div>
+          <div class="last-update" id="lastUpdate">Đang tải...</div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="hero">
+      <div class="hero-bg"></div>
+      <div class="hero-content">
+        <h1 class="hero-title">Chứng Khoán <span class="gradient-text">Thông Minh</span></h1>
+        <p class="hero-subtitle">Phân tích real-time, gợi ý đầu tư dựa trên kỹ thuật & cơ bản</p>
+      </div>
+    </section>
+
+    <!-- Market Overview -->
+    <section class="section" id="market">
+      <div class="container">
+        <h2 class="section-title">
+          <span class="section-icon">🏛️</span>
+          Tổng Quan Thị Trường
+        </h2>
+        <div class="market-cards" id="marketCards">
+          <!-- Cards injected by JS -->
+        </div>
+      </div>
+    </section>
+
+    <!-- Stock Table -->
+    <section class="section" id="stocks">
+      <div class="container">
+        <div class="section-header">
+          <h2 class="section-title">
+            <span class="section-icon">📊</span>
+            Bảng Giá Cổ Phiếu
+          </h2>
+          <div class="table-tabs" id="tableTabs">
+            <button class="tab active" data-tab="top-volume">Top Volume</button>
+            <button class="tab" data-tab="top-gainers">Top Tăng</button>
+            <button class="tab" data-tab="top-losers">Top Giảm</button>
+          </div>
+        </div>
+        <div class="table-container">
+          <table class="stock-table" id="stockTable">
+            <thead>
+              <tr>
+                <th>Mã CK</th>
+                <th>Giá</th>
+                <th>Thay Đổi</th>
+                <th>%</th>
+                <th>KL (x1000)</th>
+                <th>Cao Nhất</th>
+                <th>Thấp Nhất</th>
+              </tr>
+            </thead>
+            <tbody id="stockTableBody">
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- Investment Suggestions -->
+    <section class="section section-dark" id="suggestions">
+      <div class="container">
+        <h2 class="section-title">
+          <span class="section-icon">🤖</span>
+          Gợi Ý Đầu Tư Hôm Nay
+        </h2>
+        <div class="suggestion-grid">
+          <!-- Short Term -->
+          <div class="suggestion-column">
+            <div class="suggestion-header short-term">
+              <span class="suggestion-badge">⚡</span>
+              <h3>Short-Term <small>(Ngắn hạn)</small></h3>
+              <p>Dựa trên RSI, MACD, Volume, Price Action</p>
+            </div>
+            <div class="suggestion-cards" id="shortTermCards">
+            </div>
+          </div>
+          <!-- Long Term -->
+          <div class="suggestion-column">
+            <div class="suggestion-header long-term">
+              <span class="suggestion-badge">🏆</span>
+              <h3>Long-Term <small>(Dài hạn)</small></h3>
+              <p>Dựa trên P/E, ROE, EPS Growth, Revenue</p>
+            </div>
+            <div class="suggestion-cards" id="longTermCards">
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Chart Section -->
+    <section class="section" id="chart">
+      <div class="container">
+        <div class="section-header">
+          <h2 class="section-title">
+            <span class="section-icon">📈</span>
+            Biểu Đồ Kỹ Thuật
+          </h2>
+          <div class="chart-controls">
+            <select id="chartSymbol" class="chart-select">
+              <option value="FPT">FPT</option>
+              <option value="VNM">VNM</option>
+              <option value="VIC">VIC</option>
+              <option value="HPG">HPG</option>
+              <option value="MWG">MWG</option>
+              <option value="TCB">TCB</option>
+              <option value="VHM">VHM</option>
+              <option value="MSN">MSN</option>
+              <option value="VCB">VCB</option>
+              <option value="ACB">ACB</option>
+            </select>
+            <div class="resolution-tabs">
+              <button class="res-tab" data-res="15">15p</button>
+              <button class="res-tab active" data-res="D">1D</button>
+              <button class="res-tab" data-res="W">1W</button>
+              <button class="res-tab" data-res="M">1M</button>
+            </div>
+          </div>
+        </div>
+        <div class="chart-wrapper">
+          <div id="chartContainer" class="chart-container"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <div class="container">
+        <div class="footer-inner">
+          <div class="footer-brand">
+            <span class="logo-icon">📈</span>
+            <span class="logo-text">Trader<span class="logo-ai">AI</span></span>
+          </div>
+          <p class="footer-disclaimer">⚠️ Thông tin chỉ mang tính chất tham khảo, không phải lời khuyên đầu tư. Hãy tự nghiên cứu trước khi quyết định.</p>
+          <p class="footer-copyright">© 2026 TraderAI. Dữ liệu từ TCBS.</p>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <!-- Loading Overlay -->
+  <div class="loading-overlay" id="loadingOverlay">
+    <div class="loading-spinner">
+      <div class="spinner"></div>
+      <p>Đang tải dữ liệu thị trường...</p>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

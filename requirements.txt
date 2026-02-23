@@ -1,0 +1,7 @@
+vnstock==0.2.9.2.3
+requests
+pandas
+packaging
+ipython
+beautifulsoup4
+lxml
