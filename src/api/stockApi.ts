@@ -68,14 +68,14 @@ export async function fetchStockBars(
   return generateMockBars(ticker, countBack);
 }
 
-export async function fetchTopStocks(): Promise<any[]> {
-  const data = await apiFetch('/stocks?count=20');
+export async function fetchTopStocks(count: number = 20): Promise<any[]> {
+  const data = await apiFetch(`/stocks?count=${count}`);
 
   if (data && data.data && data.data.length > 0) {
     return data.data;
   }
 
-  return getMockTopStocks();
+  return getMockTopStocks(count);
 }
 
 export async function fetchMarketOverview(): Promise<any[]> {
@@ -142,7 +142,7 @@ function generateMockBars(ticker: string, count: number): StockBar[] {
   return bars;
 }
 
-function getMockTopStocks(): any[] {
+function getMockTopStocks(count: number = 20): any[] {
   const stocks = [
     { ticker: 'FPT', companyName: 'FPT Corporation', close: 125.5, change: 2.3, pctChange: 1.87, volume: 12500000, high: 126.8, low: 123.2 },
     { ticker: 'VNM', companyName: 'Vinamilk', close: 72.5, change: -0.8, pctChange: -1.09, volume: 8900000, high: 73.5, low: 72.0 },

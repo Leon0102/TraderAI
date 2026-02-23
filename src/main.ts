@@ -6,9 +6,12 @@ import { fetchMarketOverview, fetchTopStocks, fetchStockBars, fetchMultipleFinan
 import { renderMarketCards } from './components/marketOverview';
 import { initStockTable, renderStockTable } from './components/stockTable';
 import { initChart, updateChartData } from './components/stockChart';
-import { renderShortTermSuggestions, renderLongTermSuggestions } from './components/suggestions';
-import { analyzeShortTerm } from './analysis/technicalAnalysis';
-import { rankForLongTerm } from './analysis/fundamentalAnalysis';
+import { renderShortTermSuggestions, renderLongTermSuggestions, renderCombinedSuggestions } from './components/suggestions';
+import { analyzeShortTerm, type TechnicalSignal } from './analysis/technicalAnalysis';
+import { rankForLongTerm, type FundamentalSignal } from './analysis/fundamentalAnalysis';
+import { initSearchBar } from './components/searchBar';
+import { renderWatchlist } from './components/watchlist';
+import { renderHeatmap } from './components/heatmap';
 
 // ===========================
 // State
@@ -33,7 +36,7 @@ async function loadMarketOverview() {
 
 async function loadStockTable() {
   try {
-    const stocks = await fetchTopStocks();
+    const stocks = await fetchTopStocks(30);
     stocksData = stocks;
     renderStockTable(stocks);
   } catch (e) {
@@ -48,7 +51,8 @@ async function loadChart(symbol?: string, resolution?: string) {
     currentChartSymbol = ticker;
     currentResolution = res;
 
-    const bars = await fetchStockBars(ticker, res, 120);
+    // Load more bars for better indicator calculation
+    const bars = await fetchStockBars(ticker, res, 200);
     updateChartData(bars);
   } catch (e) {
     console.error('Chart error:', e);
@@ -57,21 +61,24 @@ async function loadChart(symbol?: string, resolution?: string) {
 
 async function loadSuggestions() {
   try {
-    const tickers = ['FPT', 'VNM', 'VIC', 'HPG', 'MWG', 'TCB', 'VHM', 'MSN', 'VCB', 'ACB', 'SSI', 'VPB', 'STB', 'GAS', 'PLX'];
+    const tickers = ['FPT', 'VNM', 'VIC', 'HPG', 'MWG', 'TCB', 'VHM', 'MSN', 'VCB', 'ACB', 'SSI', 'VPB', 'STB', 'GAS', 'PLX', 'DGC', 'PNJ', 'REE', 'MBB', 'CTG'];
 
-    // Short-term: Technical Analysis
-    const shortTermSignals = await Promise.all(
-      tickers.map(async (ticker) => {
-        const bars = await fetchStockBars(ticker, 'D', 60);
+    // Parallel fetch for speed
+    const [techSignals, financials] = await Promise.all([
+      // Tech analysis
+      Promise.all(tickers.map(async (ticker) => {
+        const bars = await fetchStockBars(ticker, 'D', 90);
         return analyzeShortTerm(ticker, bars);
-      })
-    );
-    renderShortTermSuggestions(shortTermSignals);
+      })),
+      // Fund analysis
+      fetchMultipleFinancials(tickers)
+    ]);
 
-    // Long-term: Fundamental Analysis
-    const financials = await fetchMultipleFinancials(tickers);
-    const longTermSignals = rankForLongTerm(financials);
-    renderLongTermSuggestions(longTermSignals);
+    const fundSignals = rankForLongTerm(financials);
+
+    renderShortTermSuggestions(techSignals);
+    renderLongTermSuggestions(fundSignals);
+    renderCombinedSuggestions(techSignals, fundSignals);
   } catch (e) {
     console.error('Suggestions error:', e);
   }
@@ -90,6 +97,8 @@ async function refreshAll() {
   await Promise.all([
     loadMarketOverview(),
     loadStockTable(),
+    renderHeatmap(),
+    renderWatchlist(),
   ]);
 }
 
@@ -100,9 +109,28 @@ async function refreshAll() {
 async function init() {
   const loadingOverlay = document.getElementById('loadingOverlay');
 
-  // Init components
+  // Init UI components
+  initSearchBar();
   initStockTable();
   initChart();
+
+  // Setup suggestion tabs
+  document.querySelectorAll('#suggestionTabs .tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('#suggestionTabs .tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      const target = (tab as HTMLElement).dataset.tab;
+      document.querySelectorAll('.suggestion-tab-content').forEach(c => {
+        (c as HTMLElement).style.display = 'none';
+        c.classList.remove('active');
+      });
+      const el = document.getElementById(`tab-${target}`);
+      if (el) {
+        el.style.display = 'block';
+        setTimeout(() => el.classList.add('active'), 10);
+      }
+    });
+  });
 
   // Setup chart controls
   const chartSelect = document.getElementById('chartSymbol') as HTMLSelectElement;
@@ -110,7 +138,6 @@ async function init() {
     loadChart(chartSelect.value);
   });
 
-  // Resolution tabs
   document.querySelectorAll('.res-tab').forEach(tab => {
     tab.addEventListener('click', () => {
       document.querySelectorAll('.res-tab').forEach(t => t.classList.remove('active'));
@@ -120,12 +147,12 @@ async function init() {
     });
   });
 
-  // Tab change event for stock table
+  // Data updates
   document.addEventListener('tabChange', () => {
     renderStockTable(stocksData);
   });
 
-  // Header scroll effect
+  // Header scroll
   window.addEventListener('scroll', () => {
     const header = document.getElementById('header');
     if (header) {
@@ -133,7 +160,7 @@ async function init() {
     }
   });
 
-  // Nav active state
+  // Mobile nav logic is simplified for now
   const navLinks = document.querySelectorAll('.nav-link');
   navLinks.forEach(link => {
     link.addEventListener('click', () => {
@@ -142,11 +169,13 @@ async function init() {
     });
   });
 
-  // Load all data
+  // Load all initial data
   try {
     await Promise.all([
       loadMarketOverview(),
       loadStockTable(),
+      renderHeatmap(),
+      renderWatchlist(),
       loadChart(),
       loadSuggestions(),
     ]);
@@ -162,10 +191,10 @@ async function init() {
     setTimeout(() => loadingOverlay.remove(), 500);
   }
 
-  // Auto-refresh every 30 seconds
+  // Auto-refresh every 60 seconds
   refreshInterval = window.setInterval(() => {
     refreshAll();
-  }, 30000);
+  }, 60000);
 }
 
 // Start app

@@ -20,9 +20,19 @@
           <span class="logo-icon">📈</span>
           <span class="logo-text">Trader<span class="logo-ai">AI</span></span>
         </div>
+
+        <!-- Search Bar -->
+        <div class="search-wrapper">
+          <div class="search-box">
+            <span class="search-icon">🔍</span>
+            <input type="text" id="searchInput" placeholder="Tìm mã CK (VD: FPT)... hoặc bấm /" autocomplete="off" />
+          </div>
+          <div class="search-results" id="searchResults"></div>
+        </div>
+
         <nav class="nav">
           <a href="#market" class="nav-link active" data-section="market">Thị Trường</a>
-          <a href="#suggestions" class="nav-link" data-section="suggestions">Gợi Ý Đầu Tư</a>
+          <a href="#suggestions" class="nav-link" data-section="suggestions">Gợi Ý</a>
           <a href="#chart" class="nav-link" data-section="chart">Biểu Đồ</a>
         </nav>
         <div class="header-right">
@@ -35,12 +45,20 @@
       </div>
     </header>
 
+    <!-- Watchlist Section -->
+    <section class="watchlist-section" id="watchlistSection" style="display: none;">
+      <div class="container">
+        <h3 class="watchlist-title">⭐ Danh mục theo dõi</h3>
+        <div class="watchlist-cards" id="watchlistCards"></div>
+      </div>
+    </section>
+
     <!-- Hero Section -->
     <section class="hero">
       <div class="hero-bg"></div>
       <div class="hero-content">
         <h1 class="hero-title">Chứng Khoán <span class="gradient-text">Thông Minh</span></h1>
-        <p class="hero-subtitle">Phân tích real-time, gợi ý đầu tư dựa trên kỹ thuật & cơ bản</p>
+        <p class="hero-subtitle">Phân tích chuyên sâu từ Kỹ Thuật đến Cơ Bản</p>
       </div>
     </section>
 
@@ -53,6 +71,12 @@
         </h2>
         <div class="market-cards" id="marketCards">
           <!-- Cards injected by JS -->
+        </div>
+
+        <!-- Heatmap -->
+        <h3 class="subsection-title" style="margin-top: 2rem;">Bản đồ thị trường (VN30)</h3>
+        <div class="heatmap-grid" id="heatmapGrid">
+          <div class="detail-loading"><div class="spinner small"></div></div>
         </div>
       </div>
     </section>
@@ -94,31 +118,40 @@
     <!-- Investment Suggestions -->
     <section class="section section-dark" id="suggestions">
       <div class="container">
-        <h2 class="section-title">
-          <span class="section-icon">🤖</span>
-          Gợi Ý Đầu Tư Hôm Nay
-        </h2>
-        <div class="suggestion-grid">
-          <!-- Short Term -->
-          <div class="suggestion-column">
-            <div class="suggestion-header short-term">
-              <span class="suggestion-badge">⚡</span>
-              <h3>Short-Term <small>(Ngắn hạn)</small></h3>
-              <p>Dựa trên RSI, MACD, Volume, Price Action</p>
-            </div>
-            <div class="suggestion-cards" id="shortTermCards">
-            </div>
+        <div class="section-header">
+          <h2 class="section-title">
+            <span class="section-icon">🤖</span>
+            Gợi Ý Đầu Tư AI
+          </h2>
+          <div class="table-tabs" id="suggestionTabs">
+            <button class="tab active" data-tab="short-term">Kỹ Thuật (Ngắn hạn)</button>
+            <button class="tab" data-tab="long-term">Cơ Bản (Dài hạn)</button>
+            <button class="tab" data-tab="combined">Tổng Hợp</button>
           </div>
-          <!-- Long Term -->
-          <div class="suggestion-column">
-            <div class="suggestion-header long-term">
-              <span class="suggestion-badge">🏆</span>
-              <h3>Long-Term <small>(Dài hạn)</small></h3>
-              <p>Dựa trên P/E, ROE, EPS Growth, Revenue</p>
-            </div>
-            <div class="suggestion-cards" id="longTermCards">
-            </div>
+        </div>
+
+        <!-- Short Term -->
+        <div class="suggestion-tab-content active" id="tab-short-term">
+          <div class="suggestion-header short-term">
+            <p>Dựa trên RSI, MACD, Stochastic, ADX, Bollinger Bands, Volume, Price Pattern</p>
           </div>
+          <div class="suggestion-grid-5" id="shortTermCards"></div>
+        </div>
+
+        <!-- Long Term -->
+        <div class="suggestion-tab-content" id="tab-long-term" style="display: none;">
+          <div class="suggestion-header long-term">
+            <p>Dựa trên P/E, P/B, ROE, EPS Growth, Graham Number, Cấu trúc vốn</p>
+          </div>
+          <div class="suggestion-grid-5" id="longTermCards"></div>
+        </div>
+
+        <!-- Combined -->
+        <div class="suggestion-tab-content" id="tab-combined" style="display: none;">
+          <div class="suggestion-header combined">
+            <p>Kết hợp tín hiệu kỹ thuật (40%) và nền tảng cơ bản (60%)</p>
+          </div>
+          <div class="suggestion-grid-5" id="combinedCards"></div>
         </div>
       </div>
     </section>
@@ -129,20 +162,32 @@
         <div class="section-header">
           <h2 class="section-title">
             <span class="section-icon">📈</span>
-            Biểu Đồ Kỹ Thuật
+            Biểu Đồ Phân Tích Kỹ Thuật
           </h2>
+        </div>
+
+        <!-- Chart Toolbar -->
+        <div class="chart-toolbar">
           <div class="chart-controls">
             <select id="chartSymbol" class="chart-select">
-              <option value="FPT">FPT</option>
-              <option value="VNM">VNM</option>
-              <option value="VIC">VIC</option>
-              <option value="HPG">HPG</option>
-              <option value="MWG">MWG</option>
-              <option value="TCB">TCB</option>
-              <option value="VHM">VHM</option>
-              <option value="MSN">MSN</option>
-              <option value="VCB">VCB</option>
-              <option value="ACB">ACB</option>
+              <optgroup label="VN30">
+                <option value="FPT">FPT</option>
+                <option value="HPG">HPG</option>
+                <option value="VIC">VIC</option>
+                <option value="VHM">VHM</option>
+                <option value="VNM">VNM</option>
+                <option value="MWG">MWG</option>
+                <option value="MSN">MSN</option>
+              </optgroup>
+              <optgroup label="Ngân Hàng">
+                <option value="VCB">VCB</option>
+                <option value="BID">BID</option>
+                <option value="CTG">CTG</option>
+                <option value="TCB">TCB</option>
+                <option value="VPB">VPB</option>
+                <option value="MBB">MBB</option>
+                <option value="ACB">ACB</option>
+              </optgroup>
             </select>
             <div class="resolution-tabs">
               <button class="res-tab" data-res="15">15p</button>
@@ -151,9 +196,19 @@
               <button class="res-tab" data-res="M">1M</button>
             </div>
           </div>
+          <div class="indicator-toggles">
+            <button class="ind-btn" id="toggleSMA">SMA 20/50</button>
+            <button class="ind-btn" id="toggleBB">Bollinger Bands</button>
+            <button class="ind-btn" id="toggleRSI">RSI Panel</button>
+          </div>
         </div>
+
+        <!-- Charts -->
         <div class="chart-wrapper">
           <div id="chartContainer" class="chart-container"></div>
+        </div>
+        <div class="chart-wrapper rsi-wrapper" id="rsiWrapper">
+          <div id="rsiContainer" class="chart-container" style="height: 120px;"></div>
         </div>
       </div>
     </section>
@@ -166,8 +221,8 @@
             <span class="logo-icon">📈</span>
             <span class="logo-text">Trader<span class="logo-ai">AI</span></span>
           </div>
-          <p class="footer-disclaimer">⚠️ Thông tin chỉ mang tính chất tham khảo, không phải lời khuyên đầu tư. Hãy tự nghiên cứu trước khi quyết định.</p>
-          <p class="footer-copyright">© 2026 TraderAI. Dữ liệu từ TCBS.</p>
+          <p class="footer-disclaimer">⚠️ Thông tin chỉ mang tính chất tham khảo, không phải lời khuyên đầu tư. Hãy tự phân tích hoặc tham khảo ý kiến chuyên gia trước khi quyết định.</p>
+          <p class="footer-copyright">© 2026 TraderAI. Dữ liệu từ vnstock & TCBS.</p>
         </div>
       </div>
     </footer>
@@ -177,7 +232,7 @@
   <div class="loading-overlay" id="loadingOverlay">
     <div class="loading-spinner">
       <div class="spinner"></div>
-      <p>Đang tải dữ liệu thị trường...</p>
+      <p>Hệ thống đang tổng hợp dữ liệu & phân tích AI...</p>
     </div>
   </div>
 

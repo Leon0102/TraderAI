@@ -29,3 +29,4 @@ __pycache__
 .venv
 venv
 *.egg-info
+.vercel
