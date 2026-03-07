@@ -16,7 +16,6 @@ export async function renderHeatmap() {
 
     // Sort by volume descending for size calculation
     const sorted = [...stocks].sort((a, b) => b.volume - a.volume);
-    const maxVol = sorted[0].volume;
 
     container.innerHTML = sorted.map((stock, idx) => {
       const pct = stock.pctChange;

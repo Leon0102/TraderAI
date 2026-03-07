@@ -1,7 +1,7 @@
 // Watchlist Component
 // Persists watched tickers in localStorage
 
-import { fetchStockBars, fetchFinancialData } from '../api/stockApi';
+import { fetchStockBars } from '../api/stockApi';
 import { analyzeShortTerm } from '../analysis/technicalAnalysis';
 
 const STORAGE_KEY = 'traderai_watchlist';

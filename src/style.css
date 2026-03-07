@@ -1660,4 +1660,264 @@ body {
   .detail-combined-score { flex-direction: column; gap: 24px; padding: 16px; text-align: center; }
   .score-bar-item { justify-content: center; }
   .suggestion-grid-5 { grid-template-columns: 1fr; }
+  .regime-card { min-width: 100% !important; }
+}
+
+/* ================================
+   New: Suggestion Card Badges
+   ================================ */
+
+.card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.confidence-badge, .trade-type-badge, .invest-type-badge, .holding-period-badge {
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+.confidence-badge {
+  background: rgba(99, 102, 241, 0.15);
+  color: #818cf8;
+}
+
+.confidence-high { background: rgba(16, 185, 129, 0.15); color: #34d399; }
+.confidence-mid { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
+.confidence-low { background: rgba(239, 68, 68, 0.15); color: #f87171; }
+
+.trade-type-badge {
+  background: rgba(139, 92, 246, 0.15);
+  color: #a78bfa;
+}
+
+.invest-type-badge {
+  background: rgba(20, 184, 166, 0.15);
+  color: #2dd4bf;
+}
+
+.holding-period-badge {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+}
+
+.sb-val {
+  width: 30px;
+  text-align: right;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+/* ================================
+   New: Combined Card Enhancements
+   ================================ */
+
+.market-context-badge, .combined-market-badge {
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.combined-market-badge {
+  background: rgba(99, 102, 241, 0.12);
+  color: #818cf8;
+}
+
+.market-health-mini {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.market-weights-mini {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+.combined-recommendation {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: rgba(99, 102, 241, 0.08);
+  border-radius: 8px;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  border-left: 3px solid var(--accent-primary);
+}
+
+.stoploss-text {
+  font-size: 0.72rem;
+  color: #ef4444;
+  margin-top: 4px;
+}
+
+/* ================================
+   New: Market Regime Panel
+   ================================ */
+
+.regime-card {
+  min-width: 280px;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(16, 185, 129, 0.05));
+  border: 1px solid rgba(99, 102, 241, 0.2);
+}
+
+.regime-card.regime-bull { border-color: rgba(16, 185, 129, 0.3); }
+.regime-card.regime-bear { border-color: rgba(239, 68, 68, 0.3); }
+.regime-card.regime-sideways { border-color: rgba(245, 158, 11, 0.3); }
+
+.regime-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.regime-icon { font-size: 1.4rem; }
+.regime-label { font-size: 1.1rem; font-weight: 700; color: var(--text-primary); }
+
+.regime-health {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.health-bar-bg {
+  flex: 1;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.health-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.6s ease;
+}
+
+.health-value {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.regime-details {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.regime-detail-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 6px;
+  font-size: 0.75rem;
+}
+
+.regime-detail-item span:first-child { color: var(--text-muted); }
+.regime-detail-item span:last-child { font-weight: 600; }
+
+.vol-badge {
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 0.7rem;
+}
+
+.vol-high { background: rgba(239, 68, 68, 0.15); color: #f87171; }
+.vol-normal { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
+.vol-low { background: rgba(16, 185, 129, 0.15); color: #34d399; }
+
+.level-support { color: #10b981; font-weight: 700; }
+.level-resistance { color: #ef4444; font-weight: 700; }
+
+.regime-sectors {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sector-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.sector-title {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-right: 4px;
+}
+
+.sector-tag {
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: 0.65rem;
+  font-weight: 600;
+}
+
+.sector-up { background: rgba(16, 185, 129, 0.12); color: #34d399; }
+.sector-down { background: rgba(239, 68, 68, 0.12); color: #f87171; }
+
+/* ================================
+   New: AI Recommendation Banner
+   ================================ */
+
+.detail-ai-recommendation {
+  padding: 12px 16px;
+  border-radius: 10px;
+  margin-bottom: 16px;
+}
+
+.detail-ai-recommendation.ai-positive {
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.detail-ai-recommendation.ai-negative {
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.detail-ai-recommendation.ai-neutral {
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+}
+
+.ai-rec-text {
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.ai-rec-meta {
+  margin-top: 6px;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.detail-intrinsic {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: rgba(16, 185, 129, 0.08);
+  border-radius: 8px;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  border-left: 3px solid var(--green);
 }

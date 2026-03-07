@@ -2,13 +2,14 @@
 // Vietnamese Stock Market Dashboard with Real-time Data & Investment Suggestions
 
 import './style.css';
-import { fetchMarketOverview, fetchTopStocks, fetchStockBars, fetchMultipleFinancials } from './api/stockApi';
+import { fetchMarketOverview, fetchTopStocks, fetchStockBars, fetchMultipleFinancials, fetchMarketAnalysis } from './api/stockApi';
 import { renderMarketCards } from './components/marketOverview';
 import { initStockTable, renderStockTable } from './components/stockTable';
 import { initChart, updateChartData } from './components/stockChart';
-import { renderShortTermSuggestions, renderLongTermSuggestions, renderCombinedSuggestions } from './components/suggestions';
-import { analyzeShortTerm, type TechnicalSignal } from './analysis/technicalAnalysis';
-import { rankForLongTerm, type FundamentalSignal } from './analysis/fundamentalAnalysis';
+import { renderShortTermSuggestions, renderLongTermSuggestions, renderCombinedSuggestions, setMarketContext } from './components/suggestions';
+import { analyzeShortTerm } from './analysis/technicalAnalysis';
+import { rankForLongTerm } from './analysis/fundamentalAnalysis';
+import { analyzeMarket } from './analysis/marketAnalysis';
 import { initSearchBar } from './components/searchBar';
 import { renderWatchlist } from './components/watchlist';
 import { renderHeatmap } from './components/heatmap';
@@ -20,6 +21,8 @@ let currentChartSymbol = 'FPT';
 let currentResolution = 'D';
 let stocksData: any[] = [];
 let refreshInterval: number | null = null;
+// Expose market cache for potential use by other modules
+export const marketDataCache: { data: any[]; ctx: ReturnType<typeof analyzeMarket> | null } = { data: [], ctx: null };
 
 // ===========================
 // Core Functions
@@ -27,8 +30,17 @@ let refreshInterval: number | null = null;
 
 async function loadMarketOverview() {
   try {
-    const data = await fetchMarketOverview();
-    renderMarketCards(data);
+    const [data, analysisData] = await Promise.all([
+      fetchMarketOverview(),
+      fetchMarketAnalysis()
+    ]);
+
+    const marketCtx = analyzeMarket(data, analysisData);
+    marketDataCache.data = data;
+    marketDataCache.ctx = marketCtx;
+    setMarketContext(marketCtx);
+
+    renderMarketCards(data, marketCtx);
   } catch (e) {
     console.error('Market overview error:', e);
   }
@@ -65,9 +77,9 @@ async function loadSuggestions() {
 
     // Parallel fetch for speed
     const [techSignals, financials] = await Promise.all([
-      // Tech analysis
+      // Tech analysis - fetch 200 bars for Ichimoku/MA Ribbon
       Promise.all(tickers.map(async (ticker) => {
-        const bars = await fetchStockBars(ticker, 'D', 90);
+        const bars = await fetchStockBars(ticker, 'D', 200);
         return analyzeShortTerm(ticker, bars);
       })),
       // Fund analysis

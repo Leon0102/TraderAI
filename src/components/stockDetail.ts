@@ -78,7 +78,7 @@ async function loadDetailData(ticker: string) {
 }
 
 function renderDetailContent(
-  ticker: string,
+  _ticker: string,
   tech: TechnicalSignal,
   fund: FundamentalSignal | null,
   bars: any[]
@@ -94,13 +94,32 @@ function renderDetailContent(
   const fundScore = fund?.score ?? 50;
   const combinedScore = Math.round(techScore * 0.4 + fundScore * 0.6);
 
-  // Risk/Reward
-  const riskReward = tech.stopLoss > 0 && tech.targetPrice > lastBar.close
-    ? ((tech.targetPrice - lastBar.close) / (lastBar.close - tech.stopLoss)).toFixed(1)
-    : '—';
+  // Risk/Reward from metrics
+  const rrRatio = tech.metrics['R/R'] || 0;
+  const consensus = tech.metrics['Consensus'] || 0;
 
-  // Radar chart CSS values
-  const breakdown = fund?.scoreBreakdown ?? { valuation: 12, profitability: 12, growth: 12, quality: 12 };
+  // Breakdown
+  const breakdown = fund?.scoreBreakdown ?? { valuation: 10, profitability: 10, growth: 10, quality: 10, financialHealth: 10 };
+
+  // Investment type
+  const investType = fund?.investmentType || 'BALANCED';
+  const investTypeEmoji = investType === 'VALUE' ? '💎 Value Play' :
+                          investType === 'GROWTH' ? '🚀 Growth Play' :
+                          investType === 'DIVIDEND' ? '💰 Dividend Play' : '⚖️ Balanced';
+
+  // Overall AI recommendation
+  let aiRecommendation = '';
+  if (combinedScore >= 75) {
+    aiRecommendation = '✅ AI đánh giá rất tích cực. Cổ phiếu có tiềm năng tăng trưởng cao với nền tảng cơ bản vững chắc.';
+  } else if (combinedScore >= 65) {
+    aiRecommendation = '🟢 AI đánh giá tích cực. Cổ phiếu đáng cân nhắc đầu tư, lưu ý quản trị rủi ro.';
+  } else if (combinedScore >= 50) {
+    aiRecommendation = '🟡 AI đánh giá trung tính. Cần thêm tín hiệu xác nhận trước khi quyết định.';
+  } else if (combinedScore >= 35) {
+    aiRecommendation = '🟠 AI đánh giá thận trọng. Rủi ro đang cao hơn cơ hội, nên chờ thêm.';
+  } else {
+    aiRecommendation = '🔴 AI đánh giá tiêu cực. Nên tránh mở vị thế mới, cân nhắc cắt lỗ nếu đang nắm giữ.';
+  }
 
   return `
     <!-- Price Header -->
@@ -118,6 +137,12 @@ function renderDetailContent(
       </div>
     </div>
 
+    <!-- AI Recommendation Banner -->
+    <div class="detail-ai-recommendation ${combinedScore >= 65 ? 'ai-positive' : combinedScore <= 35 ? 'ai-negative' : 'ai-neutral'}">
+      <div class="ai-rec-text">${aiRecommendation}</div>
+      ${fund ? `<div class="ai-rec-meta">${investTypeEmoji} | ${fund.holdingPeriod} | Đồng thuận: ${consensus}%</div>` : ''}
+    </div>
+
     <!-- Combined Score -->
     <div class="detail-combined-score">
       <div class="score-circle ${combinedScore >= 65 ? 'score-good' : combinedScore <= 35 ? 'score-bad' : 'score-neutral'}">
@@ -133,23 +158,28 @@ function renderDetailContent(
       <div class="score-details">
         <div class="score-bar-item">
           <span>Định giá</span>
-          <div class="score-bar"><div style="width:${breakdown.valuation * 4}%; background: #6366f1"></div></div>
-          <span>${breakdown.valuation}/25</span>
+          <div class="score-bar"><div style="width:${breakdown.valuation * 5}%; background: #6366f1"></div></div>
+          <span>${breakdown.valuation}/20</span>
         </div>
         <div class="score-bar-item">
           <span>Sinh lời</span>
-          <div class="score-bar"><div style="width:${breakdown.profitability * 4}%; background: #10b981"></div></div>
-          <span>${breakdown.profitability}/25</span>
+          <div class="score-bar"><div style="width:${breakdown.profitability * 5}%; background: #10b981"></div></div>
+          <span>${breakdown.profitability}/20</span>
         </div>
         <div class="score-bar-item">
           <span>Tăng trưởng</span>
-          <div class="score-bar"><div style="width:${breakdown.growth * 4}%; background: #f59e0b"></div></div>
-          <span>${breakdown.growth}/25</span>
+          <div class="score-bar"><div style="width:${breakdown.growth * 5}%; background: #f59e0b"></div></div>
+          <span>${breakdown.growth}/20</span>
         </div>
         <div class="score-bar-item">
           <span>Chất lượng</span>
-          <div class="score-bar"><div style="width:${breakdown.quality * 4}%; background: #ec4899"></div></div>
-          <span>${breakdown.quality}/25</span>
+          <div class="score-bar"><div style="width:${breakdown.quality * 5}%; background: #ec4899"></div></div>
+          <span>${breakdown.quality}/20</span>
+        </div>
+        <div class="score-bar-item">
+          <span>Sức khỏe TC</span>
+          <div class="score-bar"><div style="width:${breakdown.financialHealth * 5}%; background: #14b8a6"></div></div>
+          <span>${breakdown.financialHealth}/20</span>
         </div>
       </div>
     </div>
@@ -158,13 +188,15 @@ function renderDetailContent(
     <div class="detail-columns">
       <!-- Technical Analysis -->
       <div class="detail-col">
-        <h3>⚡ Phân tích Kỹ thuật</h3>
+        <h3>⚡ Phân tích Kỹ thuật (Ngắn hạn)</h3>
         <div class="detail-signal ${tech.signal === 'BUY' ? 'signal-buy' : tech.signal === 'SELL' ? 'signal-sell' : 'signal-hold'}">
           ${tech.signal === 'BUY' ? '🟢 MUA' : tech.signal === 'SELL' ? '🔴 BÁN' : '🟡 GIỮ'}
           <span class="signal-strength">${tech.strength}%</span>
         </div>
         <div class="detail-metrics-grid">
-          ${Object.entries(tech.metrics).map(([k, v]) => `
+          ${Object.entries(tech.metrics)
+            .filter(([k]) => !['Consensus', 'R/R'].includes(k))
+            .map(([k, v]) => `
             <div class="detail-metric">
               <span class="metric-label">${k}</span>
               <span class="metric-value">${typeof v === 'number' ? v.toFixed(1) : v}</span>
@@ -194,17 +226,26 @@ function renderDetailContent(
         </div>
         <div class="detail-risk">
           Rủi ro: <span class="risk-badge risk-${tech.risk.toLowerCase()}">${tech.risk === 'LOW' ? 'Thấp' : tech.risk === 'MEDIUM' ? 'Trung bình' : 'Cao'}</span>
-          &nbsp;|&nbsp; R/R: <strong>${riskReward}</strong>
+          &nbsp;|&nbsp; R/R: <strong>${rrRatio > 0 ? rrRatio + ':1' : '—'}</strong>
+          &nbsp;|&nbsp; Đồng thuận: <strong>${consensus}%</strong>
         </div>
       </div>
 
       <!-- Fundamental Analysis -->
       <div class="detail-col">
-        <h3>🏆 Phân tích Cơ bản</h3>
+        <h3>🏆 Phân tích Cơ bản (Dài hạn)</h3>
         ${fund ? `
           <div class="detail-signal ${fund.signal === 'BUY' ? 'signal-buy' : fund.signal === 'SELL' ? 'signal-sell' : 'signal-hold'}">
             ${fund.signal === 'BUY' ? '🟢 ĐẦU TƯ' : fund.signal === 'SELL' ? '🔴 TRÁNH' : '🟡 THEO DÕI'}
             <span class="signal-strength">${fund.score}/100</span>
+          </div>
+          <div class="detail-info-row">
+            <span>Loại đầu tư:</span>
+            <strong>${investTypeEmoji}</strong>
+          </div>
+          <div class="detail-info-row">
+            <span>Thời gian nắm giữ:</span>
+            <strong>📅 ${fund.holdingPeriod}</strong>
           </div>
           <div class="detail-metrics-grid">
             ${Object.entries(fund.metrics).map(([k, v]) => `
@@ -218,6 +259,11 @@ function renderDetailContent(
             <span>Vốn hóa:</span>
             <strong>${fund.capSize === 'Large' ? '🏛️ Large Cap' : fund.capSize === 'Mid' ? '🏢 Mid Cap' : '🏠 Small Cap'}</strong>
           </div>
+          ${fund.dcfValue > 0 ? `
+          <div class="detail-info-row">
+            <span>Giá trị nội tại (DCF):</span>
+            <strong>${new Intl.NumberFormat('vi-VN').format(fund.dcfValue)}đ</strong>
+          </div>` : ''}
           ${fund.grahamNumber > 0 ? `
           <div class="detail-info-row">
             <span>Graham Number:</span>
@@ -231,7 +277,7 @@ function renderDetailContent(
 
     <!-- Reasons -->
     <div class="detail-reasons">
-      <h3>📋 Chi tiết phân tích</h3>
+      <h3>📋 Chi tiết phân tích AI</h3>
       <div class="reasons-list">
         ${tech.reasons.map(r => `<div class="reason-item tech-reason">⚡ ${r}</div>`).join('')}
         ${fund ? fund.reasons.map(r => `<div class="reason-item fund-reason">🏆 ${r}</div>`).join('') : ''}

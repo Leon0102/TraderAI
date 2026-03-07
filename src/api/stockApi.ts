@@ -28,6 +28,30 @@ interface FinancialData {
   revenueGrowth: number;
   epsGrowth: number;
   marketCap: number;
+  // Enhanced fields
+  dividendYield: number;
+  debtOnEquity: number;
+  netMargin: number;
+  freeCashFlow: number;
+  totalAssets: number;
+  interestCoverage: number;
+  currentRatio: number;
+  industry: string;
+}
+
+interface MarketAnalysisData {
+  vnindexHistory: StockBar[];
+  sectors: SectorData[];
+  source: string;
+}
+
+interface SectorData {
+  name: string;
+  change: number;
+  volume: number;
+  advances: number;
+  declines: number;
+  marketCap: number;
 }
 
 // In dev mode, Vite proxies /api to http://localhost:8000
@@ -98,6 +122,16 @@ export async function fetchFinancialData(ticker: string): Promise<FinancialData 
   return getMockFinancialData(ticker);
 }
 
+export async function fetchMarketAnalysis(): Promise<MarketAnalysisData | null> {
+  const data = await apiFetch('/market?action=analysis');
+
+  if (data && data.vnindexHistory) {
+    return data;
+  }
+
+  return getMockMarketAnalysis();
+}
+
 export async function fetchMultipleFinancials(tickers: string[]): Promise<FinancialData[]> {
   const results = await Promise.all(
     tickers.map(t => fetchFinancialData(t))
@@ -142,7 +176,7 @@ function generateMockBars(ticker: string, count: number): StockBar[] {
   return bars;
 }
 
-function getMockTopStocks(count: number = 20): any[] {
+function getMockTopStocks(_count: number = 20): any[] {
   const stocks = [
     { ticker: 'FPT', companyName: 'FPT Corporation', close: 125.5, change: 2.3, pctChange: 1.87, volume: 12500000, high: 126.8, low: 123.2 },
     { ticker: 'VNM', companyName: 'Vinamilk', close: 72.5, change: -0.8, pctChange: -1.09, volume: 8900000, high: 73.5, low: 72.0 },
@@ -203,21 +237,21 @@ function getMockMarketData(): any[] {
 
 function getMockFinancialData(ticker: string): FinancialData {
   const fundamentals: Record<string, FinancialData> = {
-    FPT: { ticker: 'FPT', pe: 18.5, pb: 4.2, roe: 22.5, eps: 6800, revenue: 52000, revenueGrowth: 19.5, epsGrowth: 15.2, marketCap: 160000 },
-    VNM: { ticker: 'VNM', pe: 16.2, pb: 4.5, roe: 28.3, eps: 4470, revenue: 60000, revenueGrowth: 5.8, epsGrowth: 3.2, marketCap: 150000 },
-    VIC: { ticker: 'VIC', pe: 52.3, pb: 3.1, roe: 6.2, eps: 810, revenue: 95000, revenueGrowth: 12.3, epsGrowth: -5.1, marketCap: 145000 },
-    HPG: { ticker: 'HPG', pe: 8.5, pb: 1.5, roe: 18.2, eps: 3150, revenue: 120000, revenueGrowth: 25.3, epsGrowth: 42.1, marketCap: 115000 },
-    MWG: { ticker: 'MWG', pe: 14.2, pb: 3.2, roe: 22.8, eps: 3920, revenue: 130000, revenueGrowth: 8.5, epsGrowth: 35.6, marketCap: 80000 },
-    TCB: { ticker: 'TCB', pe: 7.8, pb: 1.3, roe: 17.5, eps: 4510, revenue: 28000, revenueGrowth: 18.2, epsGrowth: 22.3, marketCap: 120000 },
-    VHM: { ticker: 'VHM', pe: 12.5, pb: 1.8, roe: 15.2, eps: 3000, revenue: 45000, revenueGrowth: -8.5, epsGrowth: -12.3, marketCap: 125000 },
-    MSN: { ticker: 'MSN', pe: 21.3, pb: 2.8, roe: 13.5, eps: 3200, revenue: 78000, revenueGrowth: 10.8, epsGrowth: 18.5, marketCap: 95000 },
-    VCB: { ticker: 'VCB', pe: 14.5, pb: 3.5, roe: 25.2, eps: 6400, revenue: 42000, revenueGrowth: 12.5, epsGrowth: 10.8, marketCap: 400000 },
-    ACB: { ticker: 'ACB', pe: 6.8, pb: 1.6, roe: 24.5, eps: 3760, revenue: 18000, revenueGrowth: 15.8, epsGrowth: 20.1, marketCap: 75000 },
-    SSI: { ticker: 'SSI', pe: 10.2, pb: 1.8, roe: 18.2, eps: 3180, revenue: 8500, revenueGrowth: 22.5, epsGrowth: 28.3, marketCap: 45000 },
-    VPB: { ticker: 'VPB', pe: 5.5, pb: 1.1, roe: 20.5, eps: 3780, revenue: 35000, revenueGrowth: 20.3, epsGrowth: 25.8, marketCap: 95000 },
-    STB: { ticker: 'STB', pe: 8.2, pb: 1.4, roe: 17.8, eps: 3840, revenue: 15000, revenueGrowth: 13.2, epsGrowth: 18.5, marketCap: 60000 },
-    GAS: { ticker: 'GAS', pe: 15.8, pb: 3.2, roe: 21.5, eps: 4970, revenue: 85000, revenueGrowth: 8.2, epsGrowth: 5.8, marketCap: 150000 },
-    PLX: { ticker: 'PLX', pe: 12.5, pb: 2.1, roe: 16.8, eps: 3110, revenue: 250000, revenueGrowth: 5.2, epsGrowth: 8.5, marketCap: 50000 },
+    FPT: { ticker: 'FPT', pe: 18.5, pb: 4.2, roe: 22.5, eps: 6800, revenue: 52000, revenueGrowth: 19.5, epsGrowth: 15.2, marketCap: 160000, dividendYield: 2.1, debtOnEquity: 0.45, netMargin: 12.5, freeCashFlow: 8500, totalAssets: 65000, interestCoverage: 8.5, currentRatio: 1.8, industry: 'CNTT' },
+    VNM: { ticker: 'VNM', pe: 16.2, pb: 4.5, roe: 28.3, eps: 4470, revenue: 60000, revenueGrowth: 5.8, epsGrowth: 3.2, marketCap: 150000, dividendYield: 4.5, debtOnEquity: 0.25, netMargin: 18.2, freeCashFlow: 12000, totalAssets: 50000, interestCoverage: 15.2, currentRatio: 2.5, industry: 'Thực phẩm' },
+    VIC: { ticker: 'VIC', pe: 52.3, pb: 3.1, roe: 6.2, eps: 810, revenue: 95000, revenueGrowth: 12.3, epsGrowth: -5.1, marketCap: 145000, dividendYield: 0, debtOnEquity: 2.8, netMargin: 3.5, freeCashFlow: -15000, totalAssets: 450000, interestCoverage: 1.8, currentRatio: 0.9, industry: 'Bất động sản' },
+    HPG: { ticker: 'HPG', pe: 8.5, pb: 1.5, roe: 18.2, eps: 3150, revenue: 120000, revenueGrowth: 25.3, epsGrowth: 42.1, marketCap: 115000, dividendYield: 1.5, debtOnEquity: 0.65, netMargin: 8.5, freeCashFlow: 6000, totalAssets: 180000, interestCoverage: 5.5, currentRatio: 1.5, industry: 'Thép' },
+    MWG: { ticker: 'MWG', pe: 14.2, pb: 3.2, roe: 22.8, eps: 3920, revenue: 130000, revenueGrowth: 8.5, epsGrowth: 35.6, marketCap: 80000, dividendYield: 1.0, debtOnEquity: 0.55, netMargin: 4.2, freeCashFlow: 5500, totalAssets: 75000, interestCoverage: 6.2, currentRatio: 1.3, industry: 'Bán lẻ' },
+    TCB: { ticker: 'TCB', pe: 7.8, pb: 1.3, roe: 17.5, eps: 4510, revenue: 28000, revenueGrowth: 18.2, epsGrowth: 22.3, marketCap: 120000, dividendYield: 0, debtOnEquity: 5.2, netMargin: 35.0, freeCashFlow: 0, totalAssets: 680000, interestCoverage: 0, currentRatio: 0, industry: 'Ngân hàng' },
+    VHM: { ticker: 'VHM', pe: 12.5, pb: 1.8, roe: 15.2, eps: 3000, revenue: 45000, revenueGrowth: -8.5, epsGrowth: -12.3, marketCap: 125000, dividendYield: 2.0, debtOnEquity: 1.2, netMargin: 22.5, freeCashFlow: -5000, totalAssets: 200000, interestCoverage: 3.5, currentRatio: 1.1, industry: 'Bất động sản' },
+    MSN: { ticker: 'MSN', pe: 21.3, pb: 2.8, roe: 13.5, eps: 3200, revenue: 78000, revenueGrowth: 10.8, epsGrowth: 18.5, marketCap: 95000, dividendYield: 0.5, debtOnEquity: 1.5, netMargin: 5.8, freeCashFlow: 3000, totalAssets: 180000, interestCoverage: 2.8, currentRatio: 1.2, industry: 'Thực phẩm' },
+    VCB: { ticker: 'VCB', pe: 14.5, pb: 3.5, roe: 25.2, eps: 6400, revenue: 42000, revenueGrowth: 12.5, epsGrowth: 10.8, marketCap: 400000, dividendYield: 1.2, debtOnEquity: 8.5, netMargin: 42.0, freeCashFlow: 0, totalAssets: 1800000, interestCoverage: 0, currentRatio: 0, industry: 'Ngân hàng' },
+    ACB: { ticker: 'ACB', pe: 6.8, pb: 1.6, roe: 24.5, eps: 3760, revenue: 18000, revenueGrowth: 15.8, epsGrowth: 20.1, marketCap: 75000, dividendYield: 0, debtOnEquity: 7.0, netMargin: 38.0, freeCashFlow: 0, totalAssets: 650000, interestCoverage: 0, currentRatio: 0, industry: 'Ngân hàng' },
+    SSI: { ticker: 'SSI', pe: 10.2, pb: 1.8, roe: 18.2, eps: 3180, revenue: 8500, revenueGrowth: 22.5, epsGrowth: 28.3, marketCap: 45000, dividendYield: 2.5, debtOnEquity: 1.8, netMargin: 22.0, freeCashFlow: 2500, totalAssets: 55000, interestCoverage: 4.5, currentRatio: 1.6, industry: 'Chứng khoán' },
+    VPB: { ticker: 'VPB', pe: 5.5, pb: 1.1, roe: 20.5, eps: 3780, revenue: 35000, revenueGrowth: 20.3, epsGrowth: 25.8, marketCap: 95000, dividendYield: 0, debtOnEquity: 6.5, netMargin: 32.0, freeCashFlow: 0, totalAssets: 750000, interestCoverage: 0, currentRatio: 0, industry: 'Ngân hàng' },
+    STB: { ticker: 'STB', pe: 8.2, pb: 1.4, roe: 17.8, eps: 3840, revenue: 15000, revenueGrowth: 13.2, epsGrowth: 18.5, marketCap: 60000, dividendYield: 0, debtOnEquity: 7.2, netMargin: 28.0, freeCashFlow: 0, totalAssets: 580000, interestCoverage: 0, currentRatio: 0, industry: 'Ngân hàng' },
+    GAS: { ticker: 'GAS', pe: 15.8, pb: 3.2, roe: 21.5, eps: 4970, revenue: 85000, revenueGrowth: 8.2, epsGrowth: 5.8, marketCap: 150000, dividendYield: 5.0, debtOnEquity: 0.3, netMargin: 15.0, freeCashFlow: 10000, totalAssets: 95000, interestCoverage: 20.0, currentRatio: 2.2, industry: 'Dầu khí' },
+    PLX: { ticker: 'PLX', pe: 12.5, pb: 2.1, roe: 16.8, eps: 3110, revenue: 250000, revenueGrowth: 5.2, epsGrowth: 8.5, marketCap: 50000, dividendYield: 3.5, debtOnEquity: 0.8, netMargin: 2.5, freeCashFlow: 3500, totalAssets: 85000, interestCoverage: 5.0, currentRatio: 1.4, industry: 'Dầu khí' },
   };
 
   return fundamentals[ticker] || {
@@ -225,7 +259,54 @@ function getMockFinancialData(ticker: string): FinancialData {
     roe: 10 + Math.random() * 15, eps: 2000 + Math.random() * 5000,
     revenue: 20000 + Math.random() * 80000, revenueGrowth: Math.random() * 20 - 5,
     epsGrowth: Math.random() * 30 - 10, marketCap: 30000 + Math.random() * 100000,
+    dividendYield: Math.random() * 4, debtOnEquity: Math.random() * 2,
+    netMargin: 5 + Math.random() * 20, freeCashFlow: Math.random() * 10000 - 2000,
+    totalAssets: 50000 + Math.random() * 200000, interestCoverage: 2 + Math.random() * 10,
+    currentRatio: 0.8 + Math.random() * 2, industry: 'Khác',
   };
 }
 
-export type { StockBar, StockInfo, FinancialData };
+function getMockMarketAnalysis(): MarketAnalysisData {
+  const bars: StockBar[] = [];
+  let base = 1200;
+  const now = new Date();
+  for (let i = 100; i >= 0; i--) {
+    const date = new Date(now);
+    date.setDate(date.getDate() - i);
+    const change = (Math.random() - 0.48) * 15;
+    const o = base;
+    const c = base + change;
+    const h = Math.max(o, c) + Math.random() * 8;
+    const lo = Math.min(o, c) - Math.random() * 8;
+    bars.push({
+      tradingDate: date.toISOString().split('T')[0],
+      open: Math.round(o * 100) / 100,
+      high: Math.round(h * 100) / 100,
+      low: Math.round(lo * 100) / 100,
+      close: Math.round(c * 100) / 100,
+      volume: Math.floor(500000000 + Math.random() * 700000000),
+    });
+    base = c;
+  }
+
+  const mockSectors = [
+    'Ngân hàng', 'Bất động sản', 'Chứng khoán', 'Thép',
+    'Thực phẩm', 'Dầu khí', 'CNTT', 'Bán lẻ',
+    'Điện', 'Xây dựng', 'Hóa chất', 'Dệt may'
+  ];
+
+  return {
+    vnindexHistory: bars,
+    sectors: mockSectors.map(s => ({
+      name: s,
+      change: Math.round((Math.random() * 6 - 3) * 100) / 100,
+      volume: Math.floor(Math.random() * 200000000),
+      advances: Math.floor(Math.random() * 20 + 3),
+      declines: Math.floor(Math.random() * 15 + 3),
+      marketCap: Math.floor(Math.random() * 500000 + 50000),
+    })),
+    source: 'mock',
+  };
+}
+
+export type { StockBar, StockInfo, FinancialData, MarketAnalysisData, SectorData };
