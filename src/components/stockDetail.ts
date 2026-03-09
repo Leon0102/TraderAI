@@ -3,9 +3,13 @@
 
 import type { TechnicalSignal } from '../analysis/technicalAnalysis';
 import type { FundamentalSignal } from '../analysis/fundamentalAnalysis';
+import type { NewsSignal } from '../analysis/newsAnalysis';
+import type { PriceZoneResult } from '../analysis/priceZoneAnalysis';
 import { analyzeShortTerm } from '../analysis/technicalAnalysis';
 import { analyzeLongTerm } from '../analysis/fundamentalAnalysis';
-import { fetchStockBars, fetchFinancialData } from '../api/stockApi';
+import { analyzeNewsSentiment } from '../analysis/newsAnalysis';
+import { analyzePriceZones } from '../analysis/priceZoneAnalysis';
+import { fetchStockBars, fetchFinancialData, fetchTickerNews } from '../api/stockApi';
 
 let isOpen = false;
 
@@ -63,15 +67,18 @@ async function loadDetailData(ticker: string) {
   if (!body) return;
 
   try {
-    const [bars, financials] = await Promise.all([
-      fetchStockBars(ticker, 'D', 90),
+    const [bars, financials, newsData] = await Promise.all([
+      fetchStockBars(ticker, 'D', 200),
       fetchFinancialData(ticker),
+      fetchTickerNews(ticker),
     ]);
 
     const technical = analyzeShortTerm(ticker, bars);
     const fundamental = financials ? analyzeLongTerm(financials) : null;
+    const newsSignal = newsData ? analyzeNewsSentiment(newsData.articles, newsData.sentiment, ticker) : null;
+    const priceZones = analyzePriceZones(technical, fundamental, newsSignal, bars);
 
-    body.innerHTML = renderDetailContent(ticker, technical, fundamental, bars);
+    body.innerHTML = renderDetailContent(ticker, technical, fundamental, bars, newsSignal, priceZones, newsData?.articles || []);
   } catch (err) {
     body.innerHTML = `<div class="detail-error">Không thể tải dữ liệu cho ${ticker}</div>`;
   }
@@ -81,7 +88,10 @@ function renderDetailContent(
   _ticker: string,
   tech: TechnicalSignal,
   fund: FundamentalSignal | null,
-  bars: any[]
+  bars: any[],
+  news: NewsSignal | null,
+  zones: PriceZoneResult,
+  articles: import('../api/stockApi').NewsArticle[]
 ): string {
   const lastBar = bars[bars.length - 1];
   const prevBar = bars.length > 1 ? bars[bars.length - 2] : lastBar;
@@ -281,7 +291,123 @@ function renderDetailContent(
       <div class="reasons-list">
         ${tech.reasons.map(r => `<div class="reason-item tech-reason">⚡ ${r}</div>`).join('')}
         ${fund ? fund.reasons.map(r => `<div class="reason-item fund-reason">🏆 ${r}</div>`).join('') : ''}
+        ${news && news.catalysts.length > 0 ? news.catalysts.map(c => `<div class="reason-item news-reason">📰 ${c}</div>`).join('') : ''}
       </div>
     </div>
+
+    <!-- News Sentiment Section -->
+    ${news ? `
+    <div class="detail-news-section">
+      <h3>📰 Tin tức & Sentiment</h3>
+      <div class="detail-sentiment-bar">
+        <div class="sentiment-indicator ${news.sentimentScore > 15 ? 'sent-positive' : news.sentimentScore < -15 ? 'sent-negative' : 'sent-neutral'}">
+          <span class="sent-score">${news.sentimentScore > 0 ? '+' : ''}${news.sentimentScore}</span>
+          <span class="sent-label">${news.sentimentLabel}</span>
+          <span class="sent-momentum">${news.momentum === 'IMPROVING' ? '↑ Cải thiện' : news.momentum === 'WORSENING' ? '↓ Xấu đi' : '→ Ổn định'}</span>
+        </div>
+        <div class="sentiment-confidence">Độ tin cậy: ${news.confidence}% (${news.articleCount} bài)</div>
+      </div>
+      ${articles.slice(0, 5).map(a => {
+        const sentClass = a.sentiment > 15 ? 'news-pos' : a.sentiment < -15 ? 'news-neg' : 'news-neu';
+        const sentIcon = a.sentiment > 15 ? '🟢' : a.sentiment < -15 ? '🔴' : '🟡';
+        return `
+        <div class="detail-news-item ${sentClass}">
+          <span class="dnews-icon">${sentIcon}</span>
+          <div class="dnews-content">
+            <div class="dnews-title">${escapeHtml(a.title)}</div>
+            <div class="dnews-meta">${a.source} • ${a.eventType !== 'MARKET' ? a.eventType + ' • ' : ''}${a.sentiment > 0 ? '+' : ''}${a.sentiment}</div>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>` : ''}
+
+    <!-- Price Zone Recommendations -->
+    ${zones.buyZones.length > 0 || zones.sellZones.length > 0 ? `
+    <div class="detail-price-zones">
+      <h3>💰 Vùng giá Khuyến nghị</h3>
+      <div class="zone-overview">
+        <div class="zone-stat">
+          <span class="zone-stat-label">Giá hiện tại</span>
+          <span class="zone-stat-value">${zones.currentPrice.toFixed(1)}</span>
+        </div>
+        <div class="zone-stat">
+          <span class="zone-stat-label">Giá trị hợp lý</span>
+          <span class="zone-stat-value">${zones.fairValue.toFixed(1)}</span>
+        </div>
+        <div class="zone-stat ${zones.upside > 0 ? 'zone-positive' : 'zone-negative'}">
+          <span class="zone-stat-label">Upside</span>
+          <span class="zone-stat-value">${zones.upside > 0 ? '+' : ''}${zones.upside}%</span>
+        </div>
+        <div class="zone-stat zone-negative">
+          <span class="zone-stat-label">Downside (SL)</span>
+          <span class="zone-stat-value">-${zones.downside}%</span>
+        </div>
+      </div>
+
+      <div class="zone-columns">
+        <div class="zone-col">
+          <h4>🟢 Vùng MUA (DCA)</h4>
+          ${zones.buyZones.map(z => `
+            <div class="zone-item zone-buy">
+              <div class="zone-item-header">
+                <span class="zone-label">${z.label}</span>
+                <span class="zone-price">${z.price.toFixed(1)}</span>
+              </div>
+              <div class="zone-reasoning">${z.reasoning}</div>
+              <div class="zone-alloc">Tỷ trọng: ${z.allocation}%</div>
+            </div>
+          `).join('')}
+        </div>
+        <div class="zone-col">
+          <h4>🔴 Vùng BÁN (Take Profit)</h4>
+          ${zones.sellZones.map(z => `
+            <div class="zone-item zone-sell">
+              <div class="zone-item-header">
+                <span class="zone-label">${z.label}</span>
+                <span class="zone-price">${z.price.toFixed(1)}</span>
+              </div>
+              <div class="zone-reasoning">${z.reasoning}</div>
+              <div class="zone-alloc">${z.type === 'SELL' ? `Chốt: ${z.allocation}%` : ''}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    </div>` : ''}
+
+    <!-- Price Scenarios -->
+    ${zones.scenarios.length > 0 ? `
+    <div class="detail-scenarios">
+      <h3>📊 Kịch bản Giá</h3>
+      <div class="scenario-grid">
+        ${zones.scenarios.map(sc => {
+          const scClass = sc.name === 'BEST' ? 'scenario-best' : sc.name === 'WORST' ? 'scenario-worst' : 'scenario-base';
+          const scEmoji = sc.name === 'BEST' ? '🚀' : sc.name === 'WORST' ? '⚠️' : '📈';
+          const scLabel = sc.name === 'BEST' ? 'Tốt nhất' : sc.name === 'WORST' ? 'Xấu nhất' : 'Cơ sở';
+          const pctChange = zones.currentPrice > 0
+            ? ((sc.targetPrice - zones.currentPrice) / zones.currentPrice * 100).toFixed(1)
+            : '0';
+          return `
+          <div class="scenario-card ${scClass}">
+            <div class="scenario-header">
+              <span class="scenario-emoji">${scEmoji}</span>
+              <span class="scenario-name">${scLabel}</span>
+              <span class="scenario-prob">${sc.probability}%</span>
+            </div>
+            <div class="scenario-target">${sc.targetPrice.toFixed(1)}</div>
+            <div class="scenario-pct ${Number(pctChange) >= 0 ? 'positive' : 'negative'}">${Number(pctChange) >= 0 ? '+' : ''}${pctChange}%</div>
+            <div class="scenario-timeline">${sc.timeline}</div>
+            <div class="scenario-drivers">
+              ${sc.drivers.map(d => `<div class="scenario-driver">• ${d}</div>`).join('')}
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>` : ''}
   `;
+}
+
+function escapeHtml(text: string): string {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
 }

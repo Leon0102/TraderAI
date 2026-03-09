@@ -2,17 +2,19 @@
 // Vietnamese Stock Market Dashboard with Real-time Data & Investment Suggestions
 
 import './style.css';
-import { fetchMarketOverview, fetchTopStocks, fetchStockBars, fetchMultipleFinancials, fetchMarketAnalysis } from './api/stockApi';
+import { fetchMarketOverview, fetchTopStocks, fetchStockBars, fetchMultipleFinancials, fetchMarketAnalysis, fetchMarketNews, fetchMultipleTickerNews } from './api/stockApi';
 import { renderMarketCards } from './components/marketOverview';
 import { initStockTable, renderStockTable } from './components/stockTable';
 import { initChart, updateChartData } from './components/stockChart';
-import { renderShortTermSuggestions, renderLongTermSuggestions, renderCombinedSuggestions, setMarketContext } from './components/suggestions';
+import { renderShortTermSuggestions, renderLongTermSuggestions, renderCombinedSuggestions, setMarketContext, setNewsSignals } from './components/suggestions';
 import { analyzeShortTerm } from './analysis/technicalAnalysis';
 import { rankForLongTerm } from './analysis/fundamentalAnalysis';
 import { analyzeMarket } from './analysis/marketAnalysis';
+import { analyzeNewsSentiment } from './analysis/newsAnalysis';
 import { initSearchBar } from './components/searchBar';
 import { renderWatchlist } from './components/watchlist';
 import { renderHeatmap } from './components/heatmap';
+import { renderNewsFeed } from './components/newsFeed';
 
 // ===========================
 // State
@@ -76,23 +78,44 @@ async function loadSuggestions() {
     const tickers = ['FPT', 'VNM', 'VIC', 'HPG', 'MWG', 'TCB', 'VHM', 'MSN', 'VCB', 'ACB', 'SSI', 'VPB', 'STB', 'GAS', 'PLX', 'DGC', 'PNJ', 'REE', 'MBB', 'CTG'];
 
     // Parallel fetch for speed
-    const [techSignals, financials] = await Promise.all([
+    const [techSignals, financials, newsMap] = await Promise.all([
       // Tech analysis - fetch 200 bars for Ichimoku/MA Ribbon
       Promise.all(tickers.map(async (ticker) => {
         const bars = await fetchStockBars(ticker, 'D', 200);
         return analyzeShortTerm(ticker, bars);
       })),
       // Fund analysis
-      fetchMultipleFinancials(tickers)
+      fetchMultipleFinancials(tickers),
+      // News analysis
+      fetchMultipleTickerNews(tickers),
     ]);
 
     const fundSignals = rankForLongTerm(financials);
+
+    // Process news into NewsSignal map for suggestions
+    const newsSignalMap = new Map<string, ReturnType<typeof analyzeNewsSentiment>>();
+    for (const [ticker, data] of newsMap.entries()) {
+      const signal = analyzeNewsSentiment(data.articles, data.sentiment, ticker);
+      newsSignalMap.set(ticker, signal);
+    }
+    setNewsSignals(newsSignalMap);
 
     renderShortTermSuggestions(techSignals);
     renderLongTermSuggestions(fundSignals);
     renderCombinedSuggestions(techSignals, fundSignals);
   } catch (e) {
     console.error('Suggestions error:', e);
+  }
+}
+
+async function loadNewsFeed() {
+  try {
+    const newsData = await fetchMarketNews();
+    if (newsData) {
+      renderNewsFeed(newsData.articles, newsData.sentiment);
+    }
+  } catch (e) {
+    console.error('News feed error:', e);
   }
 }
 
@@ -190,6 +213,7 @@ async function init() {
       renderWatchlist(),
       loadChart(),
       loadSuggestions(),
+      loadNewsFeed(),
     ]);
   } catch (e) {
     console.error('Init error:', e);

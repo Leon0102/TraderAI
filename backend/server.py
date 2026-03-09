@@ -277,6 +277,68 @@ def get_stock_listing():
         return {"data": [], "total": 0, "source": "error", "error": str(e)}
 
 
+@app.get("/api/news")
+def get_news(
+    ticker: Optional[str] = Query(default=None),
+    tickers: Optional[str] = Query(default=None),
+    action: Optional[str] = Query(default=None),
+):
+    """Get news articles with sentiment analysis from TCBS + RSS feeds."""
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'api'))
+    from news import fetch_tcbs_news, fetch_rss_news, aggregate_sentiment, get_mock_news
+    import hashlib
+
+    articles = []
+    source = 'mock'
+
+    try:
+        if action == 'market' or (not ticker and not tickers):
+            rss_articles = fetch_rss_news()
+            if rss_articles:
+                articles = rss_articles
+                source = 'rss'
+            else:
+                articles = get_mock_news()
+
+        elif tickers:
+            ticker_list = [t.strip() for t in tickers.split(',')]
+            for t in ticker_list[:5]:
+                tcbs = fetch_tcbs_news(t)
+                articles.extend(tcbs)
+            rss = fetch_rss_news()
+            articles.extend(rss)
+            if articles:
+                source = 'tcbs+rss'
+            else:
+                articles = get_mock_news()
+
+        elif ticker:
+            tcbs = fetch_tcbs_news(ticker)
+            rss = fetch_rss_news()
+            rss_filtered = [a for a in rss if ticker in a.get('relatedTickers', [])]
+            articles = tcbs + rss_filtered + [a for a in rss if ticker not in a.get('relatedTickers', [])]
+            if articles:
+                source = 'tcbs+rss' if tcbs else 'rss'
+            else:
+                articles = get_mock_news(ticker)
+    except Exception:
+        articles = get_mock_news(ticker)
+
+    # Deduplicate
+    seen = set()
+    unique = []
+    for a in articles:
+        h = hashlib.md5(a.get('title', '').encode()).hexdigest()[:12]
+        if h not in seen:
+            seen.add(h)
+            unique.append(a)
+    articles = unique[:15]
+
+    sentiment = aggregate_sentiment(articles, ticker)
+    return {"articles": articles, "sentiment": sentiment, "source": source}
+
+
 def resample_bars(bars: list, period: int) -> list:
     """Resample daily bars into weekly/monthly bars."""
     if len(bars) <= period:

@@ -54,6 +54,45 @@ interface SectorData {
   marketCap: number;
 }
 
+interface NewsArticle {
+  title: string;
+  summary: string;
+  url: string;
+  source: string;
+  publishedAt: string;
+  sentiment: number;        // -100 to +100
+  sentimentLabel: 'positive' | 'negative' | 'neutral';
+  eventType: string;        // EARNINGS, DIVIDEND, M&A, INSIDER, REGULATION, INDUSTRY, MARKET
+  relatedTickers: string[];
+}
+
+interface SentimentSummary {
+  overall: number;          // -100 to +100
+  label: 'positive' | 'negative' | 'neutral';
+  articleCount: number;
+  positiveCount: number;
+  negativeCount: number;
+  neutralCount: number;
+  trend: 'IMPROVING' | 'WORSENING' | 'STABLE';
+  keyEvents: string[];
+}
+
+interface PriceZone {
+  type: 'BUY' | 'SELL';
+  price: number;
+  label: string;
+  reasoning: string;
+  allocation: number;       // percentage 0-100
+}
+
+interface PriceScenario {
+  name: 'BEST' | 'BASE' | 'WORST';
+  targetPrice: number;
+  probability: number;      // 0-100
+  timeline: string;
+  drivers: string[];
+}
+
 // In dev mode, Vite proxies /api to http://localhost:8000
 // In production (Vercel), /api is served by serverless functions
 const API_BASE = '/api';
@@ -137,6 +176,56 @@ export async function fetchMultipleFinancials(tickers: string[]): Promise<Financ
     tickers.map(t => fetchFinancialData(t))
   );
   return results.filter(Boolean) as FinancialData[];
+}
+
+export async function fetchTickerNews(ticker: string): Promise<{ articles: NewsArticle[]; sentiment: SentimentSummary }> {
+  const data = await apiFetch(`/news?ticker=${encodeURIComponent(ticker)}`);
+  if (data && data.articles) {
+    return { articles: data.articles, sentiment: data.sentiment };
+  }
+  return getMockTickerNews(ticker);
+}
+
+export async function fetchMarketNews(): Promise<{ articles: NewsArticle[]; sentiment: SentimentSummary }> {
+  const data = await apiFetch('/news?action=market');
+  if (data && data.articles) {
+    return { articles: data.articles, sentiment: data.sentiment };
+  }
+  return getMockTickerNews();
+}
+
+export async function fetchMultipleTickerNews(tickers: string[]): Promise<Map<string, { articles: NewsArticle[]; sentiment: SentimentSummary }>> {
+  const data = await apiFetch(`/news?tickers=${tickers.join(',')}`);
+  const result = new Map<string, { articles: NewsArticle[]; sentiment: SentimentSummary }>();
+
+  const allArticles: NewsArticle[] = data?.articles || getMockAllNews();
+
+  for (const ticker of tickers) {
+    const tickerArticles = allArticles.filter(a => a.relatedTickers.includes(ticker));
+    const otherArticles = allArticles.filter(a => !a.relatedTickers.includes(ticker));
+    const articles = [...tickerArticles, ...otherArticles.slice(0, 3)];
+
+    const pos = tickerArticles.filter(a => a.sentiment > 15).length;
+    const neg = tickerArticles.filter(a => a.sentiment < -15).length;
+    const overall = tickerArticles.length > 0
+      ? Math.round(tickerArticles.reduce((s, a) => s + a.sentiment, 0) / tickerArticles.length)
+      : 0;
+
+    result.set(ticker, {
+      articles,
+      sentiment: {
+        overall,
+        label: overall > 15 ? 'positive' : overall < -15 ? 'negative' : 'neutral',
+        articleCount: tickerArticles.length,
+        positiveCount: pos,
+        negativeCount: neg,
+        neutralCount: tickerArticles.length - pos - neg,
+        trend: 'STABLE',
+        keyEvents: [],
+      }
+    });
+  }
+  return result;
 }
 
 // ===========================
@@ -309,4 +398,59 @@ function getMockMarketAnalysis(): MarketAnalysisData {
   };
 }
 
-export type { StockBar, StockInfo, FinancialData, MarketAnalysisData, SectorData };
+function getMockAllNews(): NewsArticle[] {
+  const now = Date.now();
+  return [
+    { title: 'VN-Index vượt mốc 1.260 điểm, thanh khoản đạt kỷ lục', summary: 'Thị trường chứng khoán phiên hôm nay ghi nhận đà tăng mạnh.', url: '#', source: 'CafeF', publishedAt: new Date(now - 3600000).toISOString(), sentiment: 65, sentimentLabel: 'positive', eventType: 'MARKET', relatedTickers: [] },
+    { title: 'FPT báo lãi ròng quý 4 tăng 22% so với cùng kỳ', summary: 'Lợi nhuận ròng đạt 2.100 tỷ đồng nhờ mảng CNTT.', url: '#', source: 'VnExpress', publishedAt: new Date(now - 7200000).toISOString(), sentiment: 72, sentimentLabel: 'positive', eventType: 'EARNINGS', relatedTickers: ['FPT'] },
+    { title: 'Khối ngoại bán ròng hơn 500 tỷ đồng trên HOSE', summary: 'Tập trung bán nhóm ngân hàng và bất động sản.', url: '#', source: 'CafeF', publishedAt: new Date(now - 10800000).toISOString(), sentiment: -45, sentimentLabel: 'negative', eventType: 'MARKET', relatedTickers: ['VCB', 'TCB', 'VIC'] },
+    { title: 'HPG: Sản lượng thép tháng 3 tăng mạnh 35%', summary: 'Hòa Phát ghi nhận sản lượng kỷ lục, xuất khẩu tăng.', url: '#', source: 'VnExpress', publishedAt: new Date(now - 14400000).toISOString(), sentiment: 58, sentimentLabel: 'positive', eventType: 'EARNINGS', relatedTickers: ['HPG'] },
+    { title: 'Vingroup ký hợp đồng hợp tác chiến lược với đối tác Nhật', summary: 'Hợp tác trong lĩnh vực công nghệ và xe điện.', url: '#', source: 'CafeF', publishedAt: new Date(now - 18000000).toISOString(), sentiment: 48, sentimentLabel: 'positive', eventType: 'M&A', relatedTickers: ['VIC'] },
+    { title: 'NHNN giữ nguyên lãi suất, hỗ trợ tăng trưởng', summary: 'Ngân hàng Nhà nước ổn định lãi suất điều hành.', url: '#', source: 'VnExpress', publishedAt: new Date(now - 21600000).toISOString(), sentiment: 35, sentimentLabel: 'positive', eventType: 'REGULATION', relatedTickers: ['VCB', 'TCB', 'ACB', 'VPB', 'MBB'] },
+    { title: 'MWG: Bách Hóa Xanh lần đầu có lãi', summary: 'Doanh thu chuỗi tăng 25%, vượt kỳ vọng thị trường.', url: '#', source: 'CafeF', publishedAt: new Date(now - 25200000).toISOString(), sentiment: 68, sentimentLabel: 'positive', eventType: 'EARNINGS', relatedTickers: ['MWG'] },
+    { title: 'Cảnh báo rủi ro nhóm BĐS: áp lực trái phiếu đáo hạn', summary: 'Dòng tiền yếu tại nhiều doanh nghiệp bất động sản.', url: '#', source: 'VnExpress', publishedAt: new Date(now - 28800000).toISOString(), sentiment: -52, sentimentLabel: 'negative', eventType: 'INDUSTRY', relatedTickers: ['VIC', 'VHM'] },
+    { title: 'VNM chia cổ tức tiền mặt 2.000 đồng/cp', summary: 'Ngày chốt danh sách cổ đông ngày 15/4.', url: '#', source: 'CafeF', publishedAt: new Date(now - 32400000).toISOString(), sentiment: 55, sentimentLabel: 'positive', eventType: 'DIVIDEND', relatedTickers: ['VNM'] },
+    { title: 'SSI dẫn đầu thanh khoản, dòng tiền đổ vào chứng khoán', summary: 'Thanh khoản SSI đạt hơn 1.800 tỷ đồng.', url: '#', source: 'VnExpress', publishedAt: new Date(now - 36000000).toISOString(), sentiment: 42, sentimentLabel: 'positive', eventType: 'MARKET', relatedTickers: ['SSI'] },
+    { title: 'PV Gas đặt mục tiêu lợi nhuận tăng 15%', summary: 'ĐHĐCĐ thông qua kế hoạch kinh doanh tích cực.', url: '#', source: 'CafeF', publishedAt: new Date(now - 39600000).toISOString(), sentiment: 50, sentimentLabel: 'positive', eventType: 'EARNINGS', relatedTickers: ['GAS'] },
+    { title: 'Petrolimex cảnh báo lợi nhuận Q1 giảm do giá dầu', summary: 'Chi phí vận hành tăng và biến động giá dầu thế giới.', url: '#', source: 'VnExpress', publishedAt: new Date(now - 43200000).toISOString(), sentiment: -38, sentimentLabel: 'negative', eventType: 'EARNINGS', relatedTickers: ['PLX'] },
+    { title: 'ACB: Tín dụng tăng trưởng tốt, NIM cải thiện', summary: 'Biên lãi thuần ngân hàng mở rộng nhờ cơ cấu danh mục.', url: '#', source: 'CafeF', publishedAt: new Date(now - 46800000).toISOString(), sentiment: 45, sentimentLabel: 'positive', eventType: 'EARNINGS', relatedTickers: ['ACB'] },
+    { title: 'MSN: Masan thoái vốn mảng thịt, tập trung bán lẻ', summary: 'Chiến lược tái cơ cấu tập trung vào WinMart.', url: '#', source: 'VnExpress', publishedAt: new Date(now - 50400000).toISOString(), sentiment: 15, sentimentLabel: 'neutral', eventType: 'M&A', relatedTickers: ['MSN'] },
+    { title: 'STB hoàn tất xử lý nợ xấu, ROE cải thiện', summary: 'Sacombank hoàn thành giai đoạn tái cơ cấu.', url: '#', source: 'CafeF', publishedAt: new Date(now - 54000000).toISOString(), sentiment: 45, sentimentLabel: 'positive', eventType: 'EARNINGS', relatedTickers: ['STB'] },
+  ];
+}
+
+function getMockTickerNews(ticker?: string): { articles: NewsArticle[]; sentiment: SentimentSummary } {
+  const allNews = getMockAllNews();
+  let articles: NewsArticle[];
+
+  if (ticker) {
+    const tickerNews = allNews.filter(a => a.relatedTickers.includes(ticker));
+    const otherNews = allNews.filter(a => !a.relatedTickers.includes(ticker));
+    articles = [...tickerNews, ...otherNews].slice(0, 10);
+  } else {
+    articles = allNews.slice(0, 10);
+  }
+
+  const relevant = ticker ? articles.filter(a => a.relatedTickers.includes(ticker)) : articles;
+  const pos = relevant.filter(a => a.sentiment > 15).length;
+  const neg = relevant.filter(a => a.sentiment < -15).length;
+  const overall = relevant.length > 0
+    ? Math.round(relevant.reduce((s, a) => s + a.sentiment, 0) / relevant.length)
+    : 0;
+
+  return {
+    articles,
+    sentiment: {
+      overall,
+      label: overall > 15 ? 'positive' : overall < -15 ? 'negative' : 'neutral',
+      articleCount: relevant.length,
+      positiveCount: pos,
+      negativeCount: neg,
+      neutralCount: relevant.length - pos - neg,
+      trend: 'STABLE',
+      keyEvents: [...new Set(relevant.map(a => a.eventType).filter(e => e !== 'MARKET'))],
+    }
+  };
+}
+
+export type { StockBar, StockInfo, FinancialData, MarketAnalysisData, SectorData, NewsArticle, SentimentSummary, PriceZone, PriceScenario };

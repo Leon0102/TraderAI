@@ -5,14 +5,20 @@
 import type { TechnicalSignal } from '../analysis/technicalAnalysis';
 import type { FundamentalSignal } from '../analysis/fundamentalAnalysis';
 import type { MarketContext } from '../analysis/marketAnalysis';
+import type { NewsSignal } from '../analysis/newsAnalysis';
 import { getMarketWeights } from '../analysis/marketAnalysis';
 import { openStockDetail } from './stockDetail';
 import { addToWatchlist, isInWatchlist } from './watchlist';
 
 let currentMarketContext: MarketContext | null = null;
+let newsSignals: Map<string, NewsSignal> = new Map();
 
 export function setMarketContext(ctx: MarketContext) {
   currentMarketContext = ctx;
+}
+
+export function setNewsSignals(signals: Map<string, NewsSignal>) {
+  newsSignals = signals;
 }
 
 export function renderShortTermSuggestions(signals: TechnicalSignal[]) {
@@ -191,9 +197,11 @@ export function renderCombinedSuggestions(techSignals: TechnicalSignal[], fundSi
 
   const combined = techSignals.map(tech => {
     const fund = fundSignals.find(f => f.ticker === tech.ticker);
-    const rawScore = Math.round(tech.strength * weights.techWeight + (fund?.score ?? 50) * weights.fundWeight);
+    const news = newsSignals.get(tech.ticker);
+    const newsBoost = news ? news.impactModifier * 0.3 : 0;
+    const rawScore = Math.round(tech.strength * weights.techWeight + (fund?.score ?? 50) * weights.fundWeight + newsBoost);
     const combinedScore = Math.max(0, Math.min(100, rawScore - weights.riskPenalty));
-    return { ticker: tech.ticker, techSignal: tech, fundSignal: fund, combinedScore };
+    return { ticker: tech.ticker, techSignal: tech, fundSignal: fund, newsSignal: news, combinedScore };
   }).sort((a, b) => b.combinedScore - a.combinedScore);
 
   const marketBadge = currentMarketContext
@@ -213,6 +221,12 @@ export function renderCombinedSuggestions(techSignals: TechnicalSignal[], fundSi
     const consensus = item.techSignal.metrics['Consensus'] || 0;
     const investType = item.fundSignal?.investmentType || 'BALANCED';
     const investEmoji = investType === 'VALUE' ? '💎' : investType === 'GROWTH' ? '🚀' : investType === 'DIVIDEND' ? '💰' : '⚖️';
+
+    // News sentiment badge
+    const ns = item.newsSignal;
+    const newsBadge = ns
+      ? `<span class="news-mini-badge ${ns.sentimentScore > 15 ? 'news-badge-pos' : ns.sentimentScore < -15 ? 'news-badge-neg' : 'news-badge-neu'}" title="Sentiment: ${ns.sentimentScore}, ${ns.momentum}">${ns.sentimentScore > 15 ? '🟢↑' : ns.sentimentScore < -15 ? '🔴↓' : '🟡→'} ${ns.sentimentScore > 0 ? '+' : ''}${ns.sentimentScore}</span>`
+      : '';
 
     // Detailed recommendation text
     let recommendation = '';
@@ -235,6 +249,7 @@ export function renderCombinedSuggestions(techSignals: TechnicalSignal[], fundSi
         <div class="suggestion-card-header">
           <span class="suggestion-card-symbol">${item.ticker}</span>
           <span class="invest-type-badge">${investEmoji}</span>
+          ${newsBadge}
           <span class="suggestion-card-signal ${signalClass}">${signalText}</span>
         </div>
         <div class="combined-scores">
@@ -250,6 +265,10 @@ export function renderCombinedSuggestions(techSignals: TechnicalSignal[], fundSi
             <span class="cs-label">Đồng thuận</span>
             <div class="cs-circle" style="--score: ${consensus}">${consensus}%</div>
           </div>
+          ${ns ? `<div class="cs-item">
+            <span class="cs-label">Tin tức</span>
+            <div class="cs-circle" style="--score: ${Math.max(0, Math.min(100, 50 + ns.sentimentScore))}">${ns.sentimentScore > 0 ? '+' : ''}${ns.sentimentScore}</div>
+          </div>` : ''}
           <div class="cs-item cs-total">
             <span class="cs-label">Tổng</span>
             <div class="cs-circle cs-main" style="--score: ${s}">${s}</div>
