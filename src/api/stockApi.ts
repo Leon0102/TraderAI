@@ -106,7 +106,7 @@ interface PriceScenario {
 const API_BASE = '/api';
 
 // Real (non-mock) source labels returned by the backend for each endpoint.
-const REAL_SOURCES = new Set(['tcbs', 'vnstock', 'rss', 'tcbs+rss']);
+const REAL_SOURCES = new Set(['tcbs', 'vnstock', 'vci', 'rss', 'tcbs+rss']);
 
 // Tracks, per feed, whether the data currently shown is real or fallback/mock.
 // Read this from the UI to warn users when the dashboard is showing demo data.
