@@ -2,6 +2,14 @@
 // Calls local FastAPI backend which uses vnstock library
 // Falls back to mock data if backend is unavailable
 
+import {
+  fetchMarketOverviewDirect,
+  fetchTopStocksDirect,
+  fetchFinancialDataDirect,
+  fetchStockBarsDirect,
+  fetchMarketAnalysisDirect,
+} from './tcbsDirect';
+
 interface StockBar {
   open: number;
   high: number;
@@ -136,6 +144,14 @@ export async function fetchStockBars(
   const startDate = new Date(Date.now() - daysBack * 86400000);
   const start = startDate.toISOString().split('T')[0];
 
+  // Try calling TCBS directly from this browser first — it's much less likely
+  // to be IP-blocked than our own serverless backend (see tcbsDirect.ts).
+  const direct = await fetchStockBarsDirect(ticker, start, end);
+  if (direct && direct.length > 0) {
+    recordSource('history', 'tcbs');
+    return direct;
+  }
+
   const data = await apiFetch(`/history?ticker=${ticker}&start=${start}&end=${end}&resolution=${resolution}`);
 
   if (data && data.data && data.data.length > 0) {
@@ -149,6 +165,12 @@ export async function fetchStockBars(
 }
 
 export async function fetchTopStocks(count: number = 20): Promise<any[]> {
+  const direct = await fetchTopStocksDirect(count);
+  if (direct && direct.length > 0) {
+    recordSource('stocks', 'tcbs');
+    return direct;
+  }
+
   const data = await apiFetch(`/stocks?count=${count}`);
 
   if (data && data.data && data.data.length > 0) {
@@ -161,6 +183,12 @@ export async function fetchTopStocks(count: number = 20): Promise<any[]> {
 }
 
 export async function fetchMarketOverview(): Promise<any[]> {
+  const direct = await fetchMarketOverviewDirect();
+  if (direct && direct.length > 0) {
+    recordSource('market', 'tcbs');
+    return direct;
+  }
+
   const data = await apiFetch('/market');
 
   if (data && data.data) {
@@ -173,6 +201,12 @@ export async function fetchMarketOverview(): Promise<any[]> {
 }
 
 export async function fetchFinancialData(ticker: string): Promise<FinancialData | null> {
+  const direct = await fetchFinancialDataDirect(ticker);
+  if (direct) {
+    recordSource('finance', 'tcbs');
+    return direct;
+  }
+
   const data = await apiFetch(`/finance?ticker=${ticker}`);
 
   if (data && data.data) {
@@ -185,6 +219,12 @@ export async function fetchFinancialData(ticker: string): Promise<FinancialData 
 }
 
 export async function fetchMarketAnalysis(): Promise<MarketAnalysisData | null> {
+  const direct = await fetchMarketAnalysisDirect();
+  if (direct) {
+    recordSource('marketAnalysis', 'tcbs');
+    return direct;
+  }
+
   const data = await apiFetch('/market?action=analysis');
 
   if (data && data.vnindexHistory) {
