@@ -97,6 +97,21 @@ interface PriceScenario {
 // In production (Vercel), /api is served by serverless functions
 const API_BASE = '/api';
 
+// Real (non-mock) source labels returned by the backend for each endpoint.
+const REAL_SOURCES = new Set(['tcbs', 'vnstock', 'rss', 'tcbs+rss']);
+
+// Tracks, per feed, whether the data currently shown is real or fallback/mock.
+// Read this from the UI to warn users when the dashboard is showing demo data.
+export const dataSourceStatus: Record<string, 'real' | 'mock'> = {};
+
+function recordSource(key: string, source: string | undefined) {
+  dataSourceStatus[key] = source && REAL_SOURCES.has(source) ? 'real' : 'mock';
+}
+
+export function isAnyDataMock(): boolean {
+  return Object.values(dataSourceStatus).some(s => s === 'mock');
+}
+
 async function apiFetch(path: string): Promise<any> {
   try {
     const res = await fetch(`${API_BASE}${path}`, {
@@ -124,10 +139,12 @@ export async function fetchStockBars(
   const data = await apiFetch(`/history?ticker=${ticker}&start=${start}&end=${end}&resolution=${resolution}`);
 
   if (data && data.data && data.data.length > 0) {
+    recordSource('history', data.source);
     return data.data;
   }
 
   // Fallback mock data
+  recordSource('history', undefined);
   return generateMockBars(ticker, countBack);
 }
 
@@ -135,9 +152,11 @@ export async function fetchTopStocks(count: number = 20): Promise<any[]> {
   const data = await apiFetch(`/stocks?count=${count}`);
 
   if (data && data.data && data.data.length > 0) {
+    recordSource('stocks', data.source);
     return data.data;
   }
 
+  recordSource('stocks', undefined);
   return getMockTopStocks(count);
 }
 
@@ -145,9 +164,11 @@ export async function fetchMarketOverview(): Promise<any[]> {
   const data = await apiFetch('/market');
 
   if (data && data.data) {
+    recordSource('market', data.source);
     return data.data;
   }
 
+  recordSource('market', undefined);
   return getMockMarketData();
 }
 
@@ -155,9 +176,11 @@ export async function fetchFinancialData(ticker: string): Promise<FinancialData 
   const data = await apiFetch(`/finance?ticker=${ticker}`);
 
   if (data && data.data) {
+    recordSource('finance', data.source);
     return data.data;
   }
 
+  recordSource('finance', undefined);
   return getMockFinancialData(ticker);
 }
 
@@ -165,9 +188,11 @@ export async function fetchMarketAnalysis(): Promise<MarketAnalysisData | null> 
   const data = await apiFetch('/market?action=analysis');
 
   if (data && data.vnindexHistory) {
+    recordSource('marketAnalysis', data.source);
     return data;
   }
 
+  recordSource('marketAnalysis', undefined);
   return getMockMarketAnalysis();
 }
 
@@ -181,16 +206,20 @@ export async function fetchMultipleFinancials(tickers: string[]): Promise<Financ
 export async function fetchTickerNews(ticker: string): Promise<{ articles: NewsArticle[]; sentiment: SentimentSummary }> {
   const data = await apiFetch(`/news?ticker=${encodeURIComponent(ticker)}`);
   if (data && data.articles) {
+    recordSource('news', data.source);
     return { articles: data.articles, sentiment: data.sentiment };
   }
+  recordSource('news', undefined);
   return getMockTickerNews(ticker);
 }
 
 export async function fetchMarketNews(): Promise<{ articles: NewsArticle[]; sentiment: SentimentSummary }> {
   const data = await apiFetch('/news?action=market');
   if (data && data.articles) {
+    recordSource('news', data.source);
     return { articles: data.articles, sentiment: data.sentiment };
   }
+  recordSource('news', undefined);
   return getMockTickerNews();
 }
 

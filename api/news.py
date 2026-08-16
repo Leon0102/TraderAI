@@ -8,6 +8,8 @@ import time
 import hashlib
 warnings.filterwarnings('ignore')
 
+from _cache import cache_get, cache_set
+
 # ===========================
 # Vietnamese Sentiment Dictionary
 # ===========================
@@ -117,7 +119,11 @@ def detect_tickers(text):
 
 
 def fetch_tcbs_news(ticker):
-    """Try to fetch news from TCBS API for a specific ticker."""
+    """Try to fetch news from TCBS API for a specific ticker, cached for 120s."""
+    cache_key = f"tcbs_news:{ticker}"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
     try:
         import requests as req
         # Try activity-news endpoint
@@ -149,6 +155,7 @@ def fetch_tcbs_news(ticker):
                     'eventType': classify_event(full_text),
                     'relatedTickers': [ticker],
                 })
+            cache_set(cache_key, articles, ttl=120)
             return articles
     except Exception:
         pass
@@ -156,7 +163,10 @@ def fetch_tcbs_news(ticker):
 
 
 def fetch_rss_news():
-    """Fetch and parse RSS feeds from CafeF and VnExpress."""
+    """Fetch and parse RSS feeds from CafeF and VnExpress, cached for 120s."""
+    cached = cache_get('rss_news')
+    if cached is not None:
+        return cached
     articles = []
     feeds = [
         ('https://cafef.vn/rss/thi-truong-chung-khoan.rss', 'CafeF'),
@@ -208,6 +218,8 @@ def fetch_rss_news():
     except Exception:
         pass
 
+    if articles:
+        cache_set('rss_news', articles, ttl=120)
     return articles
 
 

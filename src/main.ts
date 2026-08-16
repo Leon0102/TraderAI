@@ -2,7 +2,7 @@
 // Vietnamese Stock Market Dashboard with Real-time Data & Investment Suggestions
 
 import './style.css';
-import { fetchMarketOverview, fetchTopStocks, fetchStockBars, fetchMultipleFinancials, fetchMarketAnalysis, fetchMarketNews, fetchMultipleTickerNews } from './api/stockApi';
+import { fetchMarketOverview, fetchTopStocks, fetchStockBars, fetchMultipleFinancials, fetchMarketAnalysis, fetchMarketNews, fetchMultipleTickerNews, isAnyDataMock } from './api/stockApi';
 import { renderMarketCards } from './components/marketOverview';
 import { initStockTable, renderStockTable } from './components/stockTable';
 import { initChart, updateChartData } from './components/stockChart';
@@ -68,14 +68,21 @@ async function loadChart(symbol?: string, resolution?: string) {
     // Load more bars for better indicator calculation
     const bars = await fetchStockBars(ticker, res, 200);
     updateChartData(bars);
+    updateDataSourceBadge();
   } catch (e) {
     console.error('Chart error:', e);
   }
 }
 
+// Safety net used only when the live top-stocks universe can't be fetched (e.g. backend down).
+const FALLBACK_TICKERS = ['FPT', 'VNM', 'VIC', 'HPG', 'MWG', 'TCB', 'VHM', 'MSN', 'VCB', 'ACB', 'SSI', 'VPB', 'STB', 'GAS', 'PLX', 'DGC', 'PNJ', 'REE', 'MBB', 'CTG'];
+
 async function loadSuggestions() {
   try {
-    const tickers = ['FPT', 'VNM', 'VIC', 'HPG', 'MWG', 'TCB', 'VHM', 'MSN', 'VCB', 'ACB', 'SSI', 'VPB', 'STB', 'GAS', 'PLX', 'DGC', 'PNJ', 'REE', 'MBB', 'CTG'];
+    // Build the analysis universe from today's actual top-volume stocks instead of a fixed list.
+    const topStocks = await fetchTopStocks(25);
+    const liveTickers = [...new Set(topStocks.map((s: any) => s.ticker).filter(Boolean))] as string[];
+    const tickers = liveTickers.length >= 10 ? liveTickers.slice(0, 20) : FALLBACK_TICKERS;
 
     // Parallel fetch for speed
     const [techSignals, financials, newsMap] = await Promise.all([
@@ -127,6 +134,12 @@ function updateLastTime() {
   }
 }
 
+function updateDataSourceBadge() {
+  const badge = document.getElementById('dataSourceBadge');
+  if (!badge) return;
+  badge.style.display = isAnyDataMock() ? 'flex' : 'none';
+}
+
 async function refreshAll() {
   updateLastTime();
   await Promise.all([
@@ -135,6 +148,7 @@ async function refreshAll() {
     renderHeatmap(),
     renderWatchlist(),
   ]);
+  updateDataSourceBadge();
 }
 
 // ===========================
@@ -220,6 +234,7 @@ async function init() {
   }
 
   updateLastTime();
+  updateDataSourceBadge();
 
   // Hide loading
   if (loadingOverlay) {

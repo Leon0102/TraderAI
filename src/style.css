@@ -181,6 +181,21 @@ body {
   letter-spacing: 1px;
 }
 
+.data-source-badge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-radius: 6px;
+  padding: 4px 8px;
+  letter-spacing: 0.5px;
+  cursor: help;
+}
+
 .live-dot {
   width: 8px;
   height: 8px;
