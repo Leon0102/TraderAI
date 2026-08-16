@@ -9,29 +9,19 @@ warnings.filterwarnings('ignore')
 import sys, os
 sys.path.insert(0, os.path.dirname(__file__))
 from _tcbs import tcbs_get
+from _vci import quote_history
 
 
 def get_history(ticker: str, start: str, end: str) -> dict:
-    """OHLCV bars for a ticker. Tries vnstock first, falls back to TCBS. source: 'vnstock'|'tcbs'|'empty'."""
-    bars = []
-
+    """OHLCV bars for a ticker. Tries VCI first, falls back to TCBS. source: 'vci'|'tcbs'|'empty'."""
     try:
-        from vnstock import stock_historical_data
-        df = stock_historical_data(ticker, start, end)
-        if df is not None and len(df) > 0:
-            for _, row in df.iterrows():
-                bars.append({
-                    "tradingDate": str(row['time'])[:10],
-                    "open": round(float(row['open']) / 1000, 2),
-                    "high": round(float(row['high']) / 1000, 2),
-                    "low": round(float(row['low']) / 1000, 2),
-                    "close": round(float(row['close']) / 1000, 2),
-                    "volume": int(row['volume']),
-                })
-            if bars:
-                return {"data": bars, "ticker": ticker, "source": "vnstock"}
+        bars = quote_history(ticker, start, end)
+        if bars:
+            return {"data": bars, "ticker": ticker, "source": "vci"}
     except Exception:
         pass
+
+    bars = []
 
     to_ts = int(time.mktime(datetime.strptime(end, '%Y-%m-%d').timetuple()))
     from_ts = int(time.mktime(datetime.strptime(start, '%Y-%m-%d').timetuple()))

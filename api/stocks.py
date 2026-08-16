@@ -7,10 +7,27 @@ warnings.filterwarnings('ignore')
 import sys, os
 sys.path.insert(0, os.path.dirname(__file__))
 from _tcbs import tcbs_get
+from _vci import price_board
+
+# TCBS's Cloudflare bot challenge blocks our datacenter IP; VCI (a different
+# provider) has been verified to still work. It has no "top volume" screener
+# on the free tier, so we price-board a fixed basket of liquid HOSE tickers
+# ourselves and rank by traded volume.
+LIQUID_UNIVERSE = [
+    'FPT', 'VNM', 'VIC', 'VHM', 'HPG', 'MWG', 'TCB', 'MSN', 'VCB', 'ACB',
+    'SSI', 'VPB', 'STB', 'GAS', 'PLX', 'DGC', 'PNJ', 'REE', 'MBB', 'CTG',
+    'BID', 'HDB', 'SHB', 'EIB', 'LPB', 'TPB', 'VJC', 'VRE', 'SAB', 'POW',
+    'GVR', 'BCM', 'PDR', 'NVL', 'KDH', 'DXG', 'HSG', 'NKG', 'DPM', 'DCM',
+]
 
 
 def get_top_stocks(count: int = 20) -> dict:
-    """Fetch top stocks by volume from TCBS. Returns {"data": [...], "source": "tcbs"|"error"}."""
+    """Top stocks by volume. Tries VCI first, falls back to TCBS. source: 'vci'|'tcbs'|'error'."""
+    vci_results = price_board(LIQUID_UNIVERSE)
+    if vci_results:
+        vci_results.sort(key=lambda r: r['volume'], reverse=True)
+        return {"data": vci_results[:count], "source": "vci"}
+
     data = tcbs_get(f"/stock-insight/v1/stock/top-stock?exchange=HOSE&type=volume&count={count}")
 
     if data and "data" in data:

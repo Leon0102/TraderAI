@@ -5,12 +5,70 @@ import warnings
 warnings.filterwarnings('ignore')
 
 import sys, os
+from typing import Optional
 sys.path.insert(0, os.path.dirname(__file__))
 from _tcbs import tcbs_get
+from _vci import financial_ratio, income_statement_years
+
+# Income-statement fields come back as coded keys (isa1, isa2, ...) rather
+# than names. Order verified against vnstock 4.0.6's fixed VCI row mapping
+# and cross-checked against live values (revenue/net-profit/EPS magnitude
+# and internal consistency: after-tax profit - minority interest ==
+# attributable-to-parent).
+ISA_NET_SALES = 'isa3'
+ISA_EPS_BASIC = 'isa23'
+
+
+def _get_finance_vci(ticker: str) -> Optional[dict]:
+    """Fundamentals via VCI. Returns None on any failure."""
+    ratio = financial_ratio(ticker)
+    if not ratio:
+        return None
+
+    pe = ratio.get('pe') or 0
+    pb = ratio.get('pb') or 0
+    roe = round((ratio.get('roe') or 0) * 100, 2)
+    dividend_yield = round((ratio.get('dividendYield') or 0) * 100, 2)
+    debt_on_equity = ratio.get('debtPerEquity') or ratio.get('debtToEquity') or 0
+    current_ratio = ratio.get('currentRatio') or 0
+    net_margin = round((ratio.get('afterTaxProfitMargin') or 0) * 100, 2)
+    market_cap = (ratio.get('marketCap') or 0) / 1_000_000_000  # VND -> billion VND
+
+    eps = 0
+    revenue_growth = 0
+    eps_growth = 0
+    try:
+        years = income_statement_years(ticker)
+        if len(years) >= 1:
+            eps = years[-1].get(ISA_EPS_BASIC) or 0
+        if len(years) >= 2:
+            rev_last, rev_prev = years[-1].get(ISA_NET_SALES), years[-2].get(ISA_NET_SALES)
+            if rev_last and rev_prev:
+                revenue_growth = round((rev_last - rev_prev) / abs(rev_prev) * 100, 2)
+            eps_last, eps_prev = years[-1].get(ISA_EPS_BASIC), years[-2].get(ISA_EPS_BASIC)
+            if eps_last and eps_prev:
+                eps_growth = round((eps_last - eps_prev) / abs(eps_prev) * 100, 2)
+    except Exception:
+        pass
+
+    return {
+        "ticker": ticker, "pe": round(pe, 2), "pb": round(pb, 2), "roe": roe,
+        "eps": round(eps, 2), "revenue": 0,
+        "revenueGrowth": revenue_growth, "epsGrowth": eps_growth,
+        "marketCap": round(market_cap, 2),
+        "dividendYield": dividend_yield, "debtOnEquity": round(debt_on_equity, 2),
+        "netMargin": net_margin,
+        "freeCashFlow": 0, "totalAssets": 0, "interestCoverage": 0,
+        "currentRatio": round(current_ratio, 2), "industry": "",
+    }
 
 
 def get_finance(ticker: str) -> dict:
-    """Fundamental overview for a ticker from TCBS. source is 'tcbs' or 'error' (no data)."""
+    """Fundamental overview for a ticker. Tries VCI first, falls back to TCBS. source: 'vci'|'tcbs'|'error'."""
+    vci_data = _get_finance_vci(ticker)
+    if vci_data:
+        return {"data": vci_data, "source": "vci"}
+
     data = tcbs_get(f"/tcanalysis/v1/ticker/{ticker}/overview", ttl=300)
     if not data:
         return {"data": None, "source": "error"}
