@@ -4,6 +4,8 @@ import json
 import warnings
 warnings.filterwarnings('ignore')
 
+import sys, os
+sys.path.insert(0, os.path.dirname(__file__))
 from _tcbs import tcbs_get
 
 
