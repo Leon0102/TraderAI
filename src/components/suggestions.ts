@@ -62,18 +62,26 @@ export function renderShortTermSuggestions(signals: TechnicalSignal[]) {
       .join('<br>');
 
     return `
-      <div class="suggestion-card" data-ticker="${signal.ticker}">
+      <div class="suggestion-card ${signalClass}-accent" data-ticker="${signal.ticker}">
         <div class="suggestion-card-header">
           <div class="suggestion-card-left">
             <span class="suggestion-card-symbol">${signal.ticker}</span>
             <span class="risk-badge ${riskClass}">${riskText}</span>
-            <span class="confidence-badge ${confidenceClass}" title="Mức đồng thuận các chỉ báo">${consensus}%</span>
           </div>
           <div class="suggestion-card-right">
             <button class="watch-btn ${watched ? 'watched' : ''}" data-watch="${signal.ticker}">${watched ? '★' : '☆'}</button>
             <span class="suggestion-card-signal ${signalClass}">${signalText}</span>
           </div>
         </div>
+
+        <div class="strength-meter">
+          <div class="strength-meter-bar">
+            <div class="strength-meter-fill" style="width: ${signal.strength}%; background: ${signal.strength > 60 ? 'var(--green)' : signal.strength < 40 ? 'var(--red)' : 'var(--yellow)'};"></div>
+          </div>
+          <span class="strength-meter-value">${signal.strength}<small>/100</small></span>
+          <span class="confidence-badge ${confidenceClass}" title="Mức đồng thuận các chỉ báo">${consensus}% đồng thuận</span>
+        </div>
+
         <div class="trade-type-badge">${tradeType}</div>
         <div class="suggestion-card-reason">${reasonsHtml}</div>
         <div class="suggestion-card-metrics">${metricsHtml}</div>
@@ -102,15 +110,6 @@ export function renderShortTermSuggestions(signals: TechnicalSignal[]) {
         </div>
 
         ${signal.pattern ? `<div class="suggestion-card-pattern">${signal.pattern}</div>` : ''}
-
-        <div style="margin-top: 8px;">
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <div style="flex: 1; height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden;">
-              <div style="height: 100%; width: ${signal.strength}%; background: ${signal.strength > 60 ? 'var(--green)' : signal.strength < 40 ? 'var(--red)' : 'var(--yellow)'}; border-radius: 2px; transition: width 0.5s ease;"></div>
-            </div>
-            <span style="font-size: 0.75rem; color: var(--text-muted); min-width: 35px;">${signal.strength}%</span>
-          </div>
-        </div>
       </div>
     `;
   }).join('');
@@ -148,7 +147,7 @@ export function renderLongTermSuggestions(signals: FundamentalSignal[]) {
       .join('<br>');
 
     return `
-      <div class="suggestion-card" data-ticker="${signal.ticker}">
+      <div class="suggestion-card ${signalClass}-accent" data-ticker="${signal.ticker}">
         <div class="suggestion-card-header">
           <div class="suggestion-card-left">
             <span class="suggestion-card-symbol">${signal.ticker}</span>
@@ -160,6 +159,14 @@ export function renderLongTermSuggestions(signals: FundamentalSignal[]) {
             <span class="suggestion-card-signal ${signalClass}">${signalText}</span>
           </div>
         </div>
+
+        <div class="strength-meter">
+          <div class="strength-meter-bar">
+            <div class="strength-meter-fill" style="width: ${signal.score}%; background: ${signal.score > 60 ? 'var(--green)' : signal.score < 40 ? 'var(--red)' : 'var(--yellow)'};"></div>
+          </div>
+          <span class="strength-meter-value">${signal.score}<small>/100</small></span>
+        </div>
+
         <div class="holding-period-badge">📅 ${signal.holdingPeriod}</div>
         <div class="suggestion-card-reason">${reasonsHtml}</div>
         <div class="suggestion-card-metrics">${metricsHtml}</div>
@@ -173,15 +180,6 @@ export function renderLongTermSuggestions(signals: FundamentalSignal[]) {
         </div>
 
         ${signal.intrinsicValue ? `<div class="suggestion-card-intrinsic">${signal.intrinsicValue}</div>` : ''}
-
-        <div style="margin-top: 8px;">
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <div style="flex: 1; height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden;">
-              <div style="height: 100%; width: ${signal.score}%; background: ${signal.score > 60 ? 'var(--green)' : signal.score < 40 ? 'var(--red)' : 'var(--yellow)'}; border-radius: 2px; transition: width 0.5s ease;"></div>
-            </div>
-            <span style="font-size: 0.75rem; color: var(--text-muted); min-width: 35px;">${signal.score}/100</span>
-          </div>
-        </div>
       </div>
     `;
   }).join('');
@@ -245,7 +243,7 @@ export function renderCombinedSuggestions(techSignals: TechnicalSignal[], fundSi
     }
 
     return `
-      <div class="suggestion-card combined-card" data-ticker="${item.ticker}">
+      <div class="suggestion-card combined-card ${signalClass}-accent" data-ticker="${item.ticker}">
         <div class="suggestion-card-header">
           <span class="suggestion-card-symbol">${item.ticker}</span>
           <span class="invest-type-badge">${investEmoji}</span>

@@ -637,6 +637,57 @@ body {
      a content-based minimum width even when the main axis is vertical, so
      one wide grandchild was enough to push every card past the viewport. */
   min-width: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Top accent bar echoing the card's BUY/SELL/HOLD verdict, so a row of
+   cards reads at a glance before the eye even reaches the text badge. */
+.suggestion-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+}
+
+.suggestion-card.signal-buy-accent::before { background: var(--gradient-green); }
+.suggestion-card.signal-sell-accent::before { background: var(--gradient-red); }
+.suggestion-card.signal-hold-accent::before { background: linear-gradient(90deg, var(--yellow), #fbbf24); }
+
+.strength-meter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 14px;
+}
+
+.strength-meter-bar {
+  flex: 1;
+  height: 7px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.strength-meter-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.5s ease;
+}
+
+.strength-meter-value {
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.strength-meter-value small {
+  font-weight: 500;
+  color: var(--text-muted);
+  font-size: 0.7rem;
 }
 
 .suggestion-card:hover {
