@@ -1130,8 +1130,15 @@ body {
 
 /* Heatmap */
 .heatmap-grid {
-  display: flex;
-  flex-wrap: wrap;
+  /* A dense grid, not flex-wrap: tiles of different sizes (hm-xl/lg/md/sm,
+     ranked by traded volume) need to actually pack like a treemap. Flex-wrap
+     just lays same-row items out with mismatched widths, so rows drift out
+     of alignment with each other; grid-auto-flow: dense fills the gaps a
+     sparse packer would otherwise leave. */
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  grid-auto-rows: 74px;
+  grid-auto-flow: dense;
   gap: 6px;
   margin-top: 16px;
   border-radius: var(--radius-lg);
@@ -1171,10 +1178,10 @@ body {
   box-shadow: var(--shadow-lg);
 }
 
-.hm-xl { flex: 1 1 calc(20% - 4px); min-height: 120px; }
-.hm-lg { flex: 1 1 calc(16.66% - 4px); min-height: 100px; }
-.hm-md { flex: 1 1 calc(12.5% - 4px); min-height: 80px; }
-.hm-sm { flex: 1 1 calc(10% - 4px); min-height: 60px; }
+.hm-xl { grid-column: span 4; grid-row: span 2; }
+.hm-lg { grid-column: span 3; grid-row: span 1; }
+.hm-md { grid-column: span 2; grid-row: span 1; }
+.hm-sm { grid-column: span 2; grid-row: span 1; }
 
 .hm-ticker { font-weight: 800; font-size: 1.1rem; }
 .hm-xl .hm-ticker { font-size: 1.5rem; }
@@ -2449,11 +2456,16 @@ body {
     padding: 0 8px;
   }
 
-  /* Heatmap: 5-6 columns of tiny tiles were unreadable on a phone. */
-  .hm-xl, .hm-lg, .hm-md, .hm-sm {
-    flex-basis: calc(33.33% - 4px);
-    min-height: 76px;
+  /* Heatmap: fewer grid columns so tiles stay readable on a phone; spans
+     are in these columns' own units, not the desktop 12-column grid. */
+  .heatmap-grid {
+    grid-template-columns: repeat(6, 1fr);
+    grid-auto-rows: 68px;
   }
+
+  .hm-xl { grid-column: span 4; }
+  .hm-lg { grid-column: span 3; }
+  .hm-md, .hm-sm { grid-column: span 2; }
 
   .hm-xl .hm-ticker, .hm-lg .hm-ticker, .hm-md .hm-ticker {
     font-size: 1rem;
@@ -2530,9 +2542,13 @@ body {
     flex-basis: calc(50% - 16px);
   }
 
-  .hm-xl, .hm-lg, .hm-md, .hm-sm {
-    flex-basis: calc(50% - 4px);
+  .heatmap-grid {
+    grid-template-columns: repeat(4, 1fr);
+    grid-auto-rows: 64px;
   }
+
+  .hm-xl { grid-column: span 4; }
+  .hm-lg, .hm-md, .hm-sm { grid-column: span 2; }
 }
 
 @media (max-width: 640px) {
