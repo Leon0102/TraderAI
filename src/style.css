@@ -576,6 +576,10 @@ body {
   border-radius: var(--radius);
   padding: 20px;
   transition: var(--transition);
+  /* Flex items (this is one, in .suggestion-cards's column flex) default to
+     a content-based minimum width even when the main axis is vertical, so
+     one wide grandchild was enough to push every card past the viewport. */
+  min-width: 0;
 }
 
 .suggestion-card:hover {
@@ -2302,4 +2306,156 @@ body {
   .zone-columns { grid-template-columns: 1fr; }
   .scenario-grid { grid-template-columns: 1fr; }
   .detail-sentiment-bar { flex-direction: column; gap: 6px; align-items: flex-start; }
+}
+
+/* CSS Grid items default to a content-based minimum width (min-width: auto),
+   which can silently stretch a "1fr" track - and everything sharing that
+   column - past the viewport, since one long unwrapped string inside any
+   card is enough to force it. This affected every grid on the page at
+   narrow widths; min-width: 0 lets grid items shrink to fit instead. */
+.market-cards > *, .suggestion-grid > *, .detail-columns > *,
+.detail-metrics-grid > *, .detail-levels > *, .regime-details > *,
+.zone-columns > *, .news-grid > *, .zone-overview > *, .scenario-grid > * {
+  min-width: 0;
+}
+
+/* ===========================
+   Mobile fixes (audited against real 375px/390px viewports)
+   =========================== */
+@media (max-width: 768px) {
+  /* Header: logo+search+badges all fought for one row and overflowed the
+     viewport. Search goes full-width on its own row; header-right wraps
+     and drops non-essential text instead of forcing a min content width. */
+  .header-inner {
+    justify-content: flex-start;
+  }
+
+  .search-wrapper {
+    order: 4;
+    flex-basis: 100%;
+    max-width: none;
+    min-width: 0;
+    margin: 0;
+  }
+
+  .header-right {
+    order: 2;
+    margin-left: auto;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+    row-gap: 4px;
+  }
+
+  .data-source-badge {
+    font-size: 0.6rem;
+    padding: 3px 6px;
+  }
+  .live-indicator span:last-child { display: none; }
+  .last-update { font-size: 0.65rem; }
+
+  .nav {
+    order: 5;
+  }
+
+  /* Hero: keep long Vietnamese subtitle from forcing horizontal scroll. */
+  .hero-title {
+    font-size: 1.5rem;
+  }
+
+  .hero-subtitle {
+    font-size: 0.95rem;
+    padding: 0 8px;
+  }
+
+  /* Heatmap: 5-6 columns of tiny tiles were unreadable on a phone. */
+  .hm-xl, .hm-lg, .hm-md, .hm-sm {
+    flex-basis: calc(33.33% - 4px);
+    min-height: 76px;
+  }
+
+  .hm-xl .hm-ticker, .hm-lg .hm-ticker, .hm-md .hm-ticker {
+    font-size: 1rem;
+  }
+
+  /* Suggestion cards: 5-across stat rows and score circles need to wrap
+     instead of squeezing into one line. */
+  .suggestion-card-levels {
+    flex-wrap: wrap;
+    gap: 10px 16px;
+  }
+
+  .level-mini {
+    flex: 1 1 calc(33.33% - 16px);
+  }
+
+  .combined-scores {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .cs-item {
+    flex: 1 1 calc(33.33% - 12px);
+  }
+
+  .sb-row span {
+    width: 44px;
+    font-size: 0.65rem;
+  }
+
+  /* Table + chart tabs: allow horizontal scroll instead of wrapping into a
+     multi-row jumble when there isn't room for every tab. */
+  .table-tabs, .resolution-tabs {
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .tab, .res-tab {
+    flex-shrink: 0;
+  }
+
+  .chart-container {
+    height: 300px;
+  }
+
+  /* Suggestion card header: symbol+badges on the left and the
+     watch/signal badge on the right were forced onto one unwrapping row,
+     pushing the BUY/SELL/HOLD signal off the edge of the screen. */
+  .suggestion-card-header {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  .suggestion-card-left, .suggestion-card-right {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 480px) {
+  .hero-title {
+    font-size: 1.3rem;
+  }
+
+  .market-card {
+    padding: 16px;
+  }
+
+  .suggestion-card {
+    padding: 14px;
+  }
+
+  .level-mini, .cs-item {
+    flex-basis: calc(50% - 16px);
+  }
+
+  .hm-xl, .hm-lg, .hm-md, .hm-sm {
+    flex-basis: calc(50% - 4px);
+  }
+}
+
+@media (max-width: 640px) {
+  .suggestion-grid-5 {
+    grid-template-columns: 1fr;
+  }
 }
