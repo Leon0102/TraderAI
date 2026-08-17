@@ -673,7 +673,7 @@ export function detectPattern(bars: StockBar[]): string {
 // Main Analysis Function (Enhanced)
 // ===========================
 
-export function analyzeShortTerm(ticker: string, bars: StockBar[]): TechnicalSignal {
+export function analyzeShortTerm(ticker: string, bars: StockBar[], foreignNetRatio?: number): TechnicalSignal {
   if (bars.length < 30) {
     return {
       ticker, signal: 'HOLD', strength: 50,
@@ -794,6 +794,18 @@ export function analyzeShortTerm(ticker: string, bars: StockBar[]): TechnicalSig
       score += 20; reasons.push(`Volume đột biến (x${metrics['Vol Ratio']}) kèm giá tăng`);
     } else {
       score -= 10; reasons.push(`Volume đột biến (x${metrics['Vol Ratio']}) kèm giá giảm`);
+    }
+  }
+
+  // Foreign net buy/sell as a % of today's traded volume (from VCI's live
+  // price board). A real, independent signal - not derivable from price bars.
+  if (typeof foreignNetRatio === 'number' && !isNaN(foreignNetRatio)) {
+    const pct = Math.round(foreignNetRatio * 1000) / 10;
+    metrics['KN Ròng %'] = pct;
+    if (foreignNetRatio > 0.1) {
+      score += 8; reasons.push(`Khối ngoại mua ròng mạnh (${pct}% KLGD)`);
+    } else if (foreignNetRatio < -0.1) {
+      score -= 8; reasons.push(`Khối ngoại bán ròng mạnh (${pct}% KLGD)`);
     }
   }
 

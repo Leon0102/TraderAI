@@ -84,12 +84,21 @@ async function loadSuggestions() {
     const liveTickers = [...new Set(topStocks.map((s: any) => s.ticker).filter(Boolean))] as string[];
     const tickers = liveTickers.length >= 10 ? liveTickers.slice(0, 20) : FALLBACK_TICKERS;
 
+    // Foreign net buy/sell as a fraction of today's volume, from the top-stocks
+    // price board we already fetched - an independent signal price bars can't give.
+    const foreignNetRatioByTicker = new Map<string, number>();
+    for (const s of topStocks) {
+      if (s.ticker && typeof s.foreignNetVolume === 'number' && s.volume) {
+        foreignNetRatioByTicker.set(s.ticker, s.foreignNetVolume / s.volume);
+      }
+    }
+
     // Parallel fetch for speed
     const [techSignals, financials, newsMap] = await Promise.all([
       // Tech analysis - fetch 200 bars for Ichimoku/MA Ribbon
       Promise.all(tickers.map(async (ticker) => {
         const bars = await fetchStockBars(ticker, 'D', 200);
-        return analyzeShortTerm(ticker, bars);
+        return analyzeShortTerm(ticker, bars, foreignNetRatioByTicker.get(ticker));
       })),
       // Fund analysis
       fetchMultipleFinancials(tickers),

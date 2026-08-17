@@ -76,7 +76,7 @@ def _vci_get(url: str, params: Optional[dict] = None, ttl: float = 0) -> Optiona
     return None
 
 
-def quote_history(symbol: str, start: str, end: str) -> list:
+def quote_history(symbol: str, start: str, end: str, ttl: float = 60) -> list:
     """Daily OHLCV bars for a stock or index ticker between start/end (YYYY-MM-DD)."""
     is_index = symbol in INDEX_SYMBOL_MAP
     vci_symbol = INDEX_SYMBOL_MAP.get(symbol, symbol)
@@ -93,7 +93,7 @@ def quote_history(symbol: str, start: str, end: str) -> list:
         "symbols": [vci_symbol],
         "to": end_ts,
         "countBack": count_back,
-    })
+    }, ttl=ttl)
     if not data or not isinstance(data, list) or not data[0]:
         return []
 
@@ -128,6 +128,8 @@ def price_board(symbols: list) -> list:
             match = item.get("matchPrice") or {}
             close = float(match.get("matchPrice") or 0) / 1000
             ref = float(match.get("referencePrice") or listing.get("refPrice") or close * 1000) / 1000
+            foreign_buy = int(match.get("foreignBuyVolume") or 0)
+            foreign_sell = int(match.get("foreignSellVolume") or 0)
             results.append({
                 "ticker": listing.get("symbol") or listing.get("ticker") or "",
                 "companyName": listing.get("organShortName") or listing.get("organName") or "",
@@ -137,6 +139,9 @@ def price_board(symbols: list) -> list:
                 "volume": int(match.get("accumulatedVolume") or 0),
                 "high": round(float(match.get("highest") or close * 1000) / 1000, 2),
                 "low": round(float(match.get("lowest") or close * 1000) / 1000, 2),
+                "foreignBuyVolume": foreign_buy,
+                "foreignSellVolume": foreign_sell,
+                "foreignNetVolume": foreign_buy - foreign_sell,
             })
         except (ValueError, TypeError):
             continue
