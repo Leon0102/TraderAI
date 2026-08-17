@@ -62,6 +62,43 @@ export function renderMarketCards(data: any[], marketCtx?: MarketContext) {
   container.innerHTML = indexCards + regimePanel;
 }
 
+// Small live-data strip under the hero title, so the landing view reads as
+// "here's today's market" rather than pure marketing copy above the fold.
+export function renderHeroQuickStats(data: any[], ctx?: MarketContext) {
+  const el = document.getElementById('heroQuickStats');
+  if (!el) return;
+
+  const vnindex = data.find(d => d.ticker === 'VNINDEX');
+  if (!vnindex) return;
+
+  const change = typeof vnindex.change === 'number' ? vnindex.change : 0;
+  const pctChange = typeof vnindex.pctChange === 'number' ? vnindex.pctChange : 0;
+  const direction = change > 0 ? 'up' : change < 0 ? 'down' : 'neutral';
+  const arrow = change > 0 ? '▲' : change < 0 ? '▼' : '●';
+  const sign = change > 0 ? '+' : '';
+
+  const regimeEmoji = ctx?.regime === 'BULL' ? '🐂' : ctx?.regime === 'BEAR' ? '🐻' : '🦀';
+  const regimeLabel = ctx?.regime === 'BULL' ? 'Thị trường tăng' : ctx?.regime === 'BEAR' ? 'Thị trường giảm' : 'Đi ngang';
+
+  el.innerHTML = `
+    <div class="hero-stat">
+      <span class="hero-stat-label">VN-INDEX</span>
+      <span class="hero-stat-value ${direction}">${vnindex.close.toFixed(2)} <small>${arrow} ${sign}${pctChange.toFixed(2)}%</small></span>
+    </div>
+    <div class="hero-stat-divider"></div>
+    <div class="hero-stat">
+      <span class="hero-stat-label">Xu hướng</span>
+      <span class="hero-stat-value">${regimeEmoji} ${regimeLabel}</span>
+    </div>
+    ${ctx ? `
+    <div class="hero-stat-divider"></div>
+    <div class="hero-stat">
+      <span class="hero-stat-label">Sức khỏe TT</span>
+      <span class="hero-stat-value">${ctx.healthScore}<small>/100</small></span>
+    </div>` : ''}
+  `;
+}
+
 function renderRegimePanel(ctx: MarketContext): string {
   const regimeEmoji = ctx.regime === 'BULL' ? '🐂' : ctx.regime === 'BEAR' ? '🐻' : '↔️';
   const regimeLabel = ctx.regime === 'BULL' ? 'Tăng giá' : ctx.regime === 'BEAR' ? 'Giảm giá' : 'Sideway';

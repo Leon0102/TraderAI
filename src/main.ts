@@ -3,7 +3,7 @@
 
 import './style.css';
 import { fetchMarketOverview, fetchTopStocks, fetchStockBars, fetchMultipleFinancials, fetchMarketAnalysis, fetchMarketNews, fetchMultipleTickerNews, isAnyDataMock } from './api/stockApi';
-import { renderMarketCards } from './components/marketOverview';
+import { renderMarketCards, renderHeroQuickStats } from './components/marketOverview';
 import { initStockTable, renderStockTable } from './components/stockTable';
 import { initChart, updateChartData } from './components/stockChart';
 import { renderShortTermSuggestions, renderLongTermSuggestions, renderCombinedSuggestions, setMarketContext, setNewsSignals } from './components/suggestions';
@@ -43,6 +43,7 @@ async function loadMarketOverview() {
     setMarketContext(marketCtx);
 
     renderMarketCards(data, marketCtx);
+    renderHeroQuickStats(data, marketCtx);
   } catch (e) {
     console.error('Market overview error:', e);
   }
