@@ -295,6 +295,20 @@ body {
   font-size: 1.4rem;
 }
 
+.subsection-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  margin: 32px 0 20px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-primary);
+}
+
+.subsection-title .section-icon {
+  font-size: 1.15rem;
+}
+
 .section-header {
   display: flex;
   justify-content: space-between;
@@ -325,6 +339,7 @@ body {
   transition: var(--transition);
   position: relative;
   overflow: hidden;
+  box-shadow: var(--shadow-sm);
 }
 
 .market-card::before {
@@ -576,6 +591,7 @@ body {
   border-radius: var(--radius);
   padding: 20px;
   transition: var(--transition);
+  box-shadow: var(--shadow-sm);
   /* Flex items (this is one, in .suggestion-cards's column flex) default to
      a content-based minimum width even when the main axis is vertical, so
      one wide grandchild was enough to push every card past the viewport. */
@@ -1075,13 +1091,13 @@ body {
 .heatmap-grid {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 6px;
   margin-top: 16px;
   border-radius: var(--radius-lg);
-  overflow: hidden;
   background: var(--bg-card);
-  padding: 8px;
+  padding: 10px;
   border: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow: var(--shadow-sm);
 }
 
 .heatmap-cell {
@@ -1089,18 +1105,29 @@ body {
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
-  transition: filter 0.2s, transform 0.2s;
+  transition: filter 0.2s, transform 0.2s, box-shadow 0.2s;
   color: white;
   text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Subtle top-left sheen for a bit of depth on otherwise flat solid-color tiles. */
+.heatmap-cell::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, transparent 55%);
+  pointer-events: none;
 }
 
 .heatmap-cell:hover {
-  filter: brightness(1.2);
-  transform: scale(1.02);
+  filter: brightness(1.15);
+  transform: scale(1.03);
   z-index: 2;
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--shadow-lg);
 }
 
 .hm-xl { flex: 1 1 calc(20% - 4px); min-height: 120px; }
@@ -1737,10 +1764,22 @@ body {
    ================================ */
 
 .market-context-badge, .combined-market-badge {
-  padding: 2px 8px;
+  /* These sit as the first child inside a suggestion-grid-5 grid alongside
+     the cards; without spanning every column they'd otherwise claim one
+     whole (row-height-tall) grid cell for a one-line badge. */
+  grid-column: 1 / -1;
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
   border-radius: 12px;
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   font-weight: 600;
+  background: rgba(99, 102, 241, 0.12);
+  color: var(--accent-secondary);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  margin-bottom: 4px;
 }
 
 .combined-market-badge {
@@ -1984,11 +2023,11 @@ body {
   cursor: pointer;
   transition: all 0.2s;
 }
-.news-filter-btn:hover { border-color: var(--primary); color: var(--text-primary); }
+.news-filter-btn:hover { border-color: var(--accent-primary); color: var(--text-primary); }
 .news-filter-btn.active {
-  background: var(--primary);
+  background: var(--accent-primary);
   color: #fff;
-  border-color: var(--primary);
+  border-color: var(--accent-primary);
 }
 
 .news-grid {
@@ -1997,11 +2036,12 @@ body {
   gap: 12px;
 }
 .news-card {
-  background: var(--card-bg);
+  background: var(--bg-card);
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 10px;
   padding: 14px;
   transition: transform 0.2s, box-shadow 0.2s;
+  box-shadow: var(--shadow-sm);
 }
 .news-card:hover {
   transform: translateY(-2px);
@@ -2058,7 +2098,7 @@ body {
   background: rgba(255, 255, 255, 0.08);
   border-radius: 10px;
   font-size: 0.7rem;
-  color: var(--primary);
+  color: var(--accent-primary);
   cursor: pointer;
 }
 .news-ticker-tag:hover { background: rgba(99, 102, 241, 0.3); }
