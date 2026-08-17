@@ -119,16 +119,26 @@ export function isAnyDataMock(): boolean {
   return Object.values(dataSourceStatus).some(s => s === 'mock');
 }
 
-async function apiFetch(path: string): Promise<any> {
-  try {
-    const res = await fetch(`${API_BASE}${path}`, {
-      headers: { 'Accept': 'application/json' },
-    });
-    if (res.ok) {
-      return await res.json();
+// The page fires dozens of these concurrently on load (20+ tickers x
+// history/finance/news), which can transiently overwhelm the upstream data
+// source and fail a handful of requests even though the source is fine
+// moments later. One retry after a short pause recovers most of those
+// instead of silently falling back to mock data.
+async function apiFetch(path: string, retries = 1): Promise<any> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(`${API_BASE}${path}`, {
+        headers: { 'Accept': 'application/json' },
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (_e) {
+      // Backend unavailable, fall through to retry/null
     }
-  } catch (_e) {
-    // Backend unavailable, fall through to null
+    if (attempt < retries) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
   }
   return null;
 }

@@ -227,7 +227,12 @@ async function init() {
     });
   });
 
-  // Load all initial data
+  // Load initial data in two waves. Firing all ~7 loaders (suggestions alone
+  // fans out to 20 tickers x 3 endpoints) in a single Promise.all sends 60+
+  // simultaneous requests, which can transiently overwhelm the upstream data
+  // source and knock some of them into a mock-data fallback. The above-fold
+  // content (market, table, heatmap, watchlist, chart) goes first so it's
+  // both fast and unaffected by contention from the heavier second wave.
   try {
     await Promise.all([
       loadMarketOverview(),
@@ -235,11 +240,9 @@ async function init() {
       renderHeatmap(),
       renderWatchlist(),
       loadChart(),
-      loadSuggestions(),
-      loadNewsFeed(),
     ]);
   } catch (e) {
-    console.error('Init error:', e);
+    console.error('Init error (wave 1):', e);
   }
 
   updateLastTime();
@@ -250,6 +253,17 @@ async function init() {
     loadingOverlay.classList.add('hidden');
     setTimeout(() => loadingOverlay.remove(), 500);
   }
+
+  try {
+    await Promise.all([
+      loadSuggestions(),
+      loadNewsFeed(),
+    ]);
+  } catch (e) {
+    console.error('Init error (wave 2):', e);
+  }
+
+  updateDataSourceBadge();
 
   // Auto-refresh every 60 seconds
   refreshInterval = window.setInterval(() => {
