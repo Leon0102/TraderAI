@@ -40,13 +40,10 @@ app.add_middleware(
 
 
 @app.get("/api/market")
-def api_market():
-    return get_market_overview()
-
-
-@app.get("/api/market/analysis")
-def api_market_analysis():
-    return get_market_analysis()
+def api_market(action: Optional[str] = Query(default=None)):
+    # Matches api/market.py's query-param convention (?action=analysis),
+    # since the frontend calls this same path either way.
+    return get_market_analysis() if action == 'analysis' else get_market_overview()
 
 
 @app.get("/api/stocks")

@@ -242,6 +242,7 @@ export async function fetchMarketNews(): Promise<{ articles: NewsArticle[]; sent
 
 export async function fetchMultipleTickerNews(tickers: string[]): Promise<Map<string, { articles: NewsArticle[]; sentiment: SentimentSummary }>> {
   const data = await apiFetch(`/news?tickers=${tickers.join(',')}`);
+  recordSource('news', data?.articles ? data.source : undefined);
   const result = new Map<string, { articles: NewsArticle[]; sentiment: SentimentSummary }>();
 
   const allArticles: NewsArticle[] = data?.articles || getMockAllNews();
