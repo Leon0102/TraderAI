@@ -26,8 +26,7 @@ from market import get_market_overview, get_market_analysis  # noqa: E402
 from stocks import get_top_stocks  # noqa: E402
 from finance import get_finance  # noqa: E402
 from history import get_history  # noqa: E402
-from news import fetch_tcbs_news, fetch_rss_news, aggregate_sentiment, get_mock_news  # noqa: E402
-import hashlib
+from news import get_news as _get_news  # noqa: E402
 
 app = FastAPI(title="TraderAI API", version="1.0.0")
 
@@ -99,51 +98,7 @@ def api_news(
     tickers: Optional[str] = Query(default=None),
     action: Optional[str] = Query(default=None),
 ):
-    articles = []
-    source = 'mock'
-
-    try:
-        if action == 'market' or (not ticker and not tickers):
-            rss_articles = fetch_rss_news()
-            if rss_articles:
-                articles = rss_articles
-                source = 'rss'
-            else:
-                articles = get_mock_news()
-
-        elif tickers:
-            ticker_list = [t.strip() for t in tickers.split(',')]
-            for t in ticker_list[:5]:
-                articles.extend(fetch_tcbs_news(t))
-            articles.extend(fetch_rss_news())
-            if articles:
-                source = 'tcbs+rss'
-            else:
-                articles = get_mock_news()
-
-        elif ticker:
-            tcbs = fetch_tcbs_news(ticker)
-            rss = fetch_rss_news()
-            rss_filtered = [a for a in rss if ticker in a.get('relatedTickers', [])]
-            articles = tcbs + rss_filtered + [a for a in rss if ticker not in a.get('relatedTickers', [])]
-            if articles:
-                source = 'tcbs+rss' if tcbs else 'rss'
-            else:
-                articles = get_mock_news(ticker)
-    except Exception:
-        articles = get_mock_news(ticker)
-
-    seen = set()
-    unique = []
-    for a in articles:
-        h = hashlib.md5(a.get('title', '').encode()).hexdigest()[:12]
-        if h not in seen:
-            seen.add(h)
-            unique.append(a)
-    articles = unique[:15]
-
-    sentiment = aggregate_sentiment(articles, ticker)
-    return {"articles": articles, "sentiment": sentiment, "source": source}
+    return _get_news(ticker=ticker, tickers=tickers, action=action)
 
 
 if __name__ == "__main__":

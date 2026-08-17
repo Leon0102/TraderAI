@@ -162,3 +162,21 @@ def income_statement_years(symbol: str) -> list:
         return []
     years = (data.get("data") or {}).get("years")
     return years if isinstance(years, list) else []
+
+
+def company_news(symbol: str, days: int = 60, size: int = 15) -> list:
+    """Official company disclosures/announcements (resolutions, dividends, personnel
+    changes, ...) for a ticker. Real regulatory-filing titles, not editorial news -
+    there is no summary text, so sentiment analysis on these leans neutral."""
+    from datetime import datetime, timedelta
+    from_date = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
+    to_date = datetime.now().strftime("%Y%m%d")
+    data = _vci_get(
+        f"{IQ_URL}/v1/news",
+        params={"ticker": symbol, "fromDate": from_date, "toDate": to_date, "languageId": 1, "page": 0, "size": size},
+        ttl=180,
+    )
+    if not data:
+        return []
+    content = (data.get("data") or {}).get("content")
+    return content if isinstance(content, list) else []

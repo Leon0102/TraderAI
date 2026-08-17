@@ -120,6 +120,40 @@ def detect_tickers(text):
     return found
 
 
+def fetch_vci_news(ticker):
+    """Official company disclosures from VCI for a specific ticker, cached for 180s.
+
+    These are regulatory-filing titles (board resolutions, dividend notices,
+    personnel changes...), not editorial articles - there's no summary text,
+    so sentiment analysis on the title alone leans neutral more often than
+    for narrative news. Still real, ticker-specific data (source: 'VCI').
+    """
+    from _vci import company_news
+    try:
+        items = company_news(ticker)
+    except Exception:
+        return []
+
+    articles = []
+    for item in items:
+        title = item.get('newsTitle') or ''
+        if not title:
+            continue
+        sentiment = analyze_sentiment(title)
+        articles.append({
+            'title': title,
+            'summary': '',
+            'url': item.get('newsSourceLink') or '',
+            'source': 'VCI',
+            'publishedAt': str(item.get('publicDate') or '')[:19],
+            'sentiment': sentiment,
+            'sentimentLabel': 'positive' if sentiment > 15 else ('negative' if sentiment < -15 else 'neutral'),
+            'eventType': classify_event(title),
+            'relatedTickers': [ticker],
+        })
+    return articles
+
+
 def fetch_tcbs_news(ticker):
     """Try to fetch news from TCBS API for a specific ticker, cached for 120s."""
     cache_key = f"tcbs_news:{ticker}"
@@ -320,6 +354,79 @@ def get_mock_news(ticker=None):
     return result[:12]
 
 
+# Large, liquid tickers used to build a "market-wide" news feed, since VCI's
+# news endpoint (unlike the old TCBS one) requires a specific ticker.
+MARKET_NEWS_TICKERS = ['FPT', 'VNM', 'VIC', 'VCB', 'HPG', 'MWG', 'TCB', 'VHM']
+
+
+def get_news(ticker=None, tickers=None, action=None) -> dict:
+    """News + sentiment. Tries VCI (real company disclosures) first, then TCBS+RSS, then mock."""
+    articles = []
+    source = 'mock'
+
+    try:
+        if action == 'market' or (not ticker and not tickers):
+            for t in MARKET_NEWS_TICKERS:
+                articles.extend(fetch_vci_news(t))
+            if articles:
+                source = 'vci'
+            else:
+                rss_articles = fetch_rss_news()
+                if rss_articles:
+                    articles = rss_articles
+                    source = 'rss'
+                else:
+                    articles = get_mock_news()
+                    source = 'mock'
+
+        elif tickers:
+            ticker_list = [t.strip() for t in tickers.split(',')]
+            for t in ticker_list[:5]:
+                articles.extend(fetch_vci_news(t))
+            if articles:
+                source = 'vci'
+            else:
+                for t in ticker_list[:5]:
+                    articles.extend(fetch_tcbs_news(t))
+                articles.extend(fetch_rss_news())
+                source = 'tcbs+rss' if articles else 'mock'
+                if not articles:
+                    articles = get_mock_news()
+
+        elif ticker:
+            vci_articles = fetch_vci_news(ticker)
+            if vci_articles:
+                articles = vci_articles
+                source = 'vci'
+            else:
+                tcbs = fetch_tcbs_news(ticker)
+                rss = fetch_rss_news()
+                rss_filtered = [a for a in rss if ticker in a.get('relatedTickers', [])]
+                articles = tcbs + rss_filtered + [a for a in rss if ticker not in a.get('relatedTickers', [])]
+                if articles:
+                    source = 'tcbs+rss' if tcbs else 'rss'
+                else:
+                    articles = get_mock_news(ticker)
+                    source = 'mock'
+
+    except Exception:
+        articles = get_mock_news(ticker)
+        source = 'mock'
+
+    # Deduplicate by title hash
+    seen = set()
+    unique = []
+    for a in articles:
+        h = hashlib.md5(a.get('title', '').encode()).hexdigest()[:12]
+        if h not in seen:
+            seen.add(h)
+            unique.append(a)
+    articles = unique[:15]
+
+    sentiment = aggregate_sentiment(articles, ticker)
+    return {'articles': articles, 'sentiment': sentiment, 'source': source}
+
+
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         from urllib.parse import parse_qs, urlparse
@@ -329,70 +436,7 @@ class handler(BaseHTTPRequestHandler):
         ticker = params.get('ticker', [None])[0]
         tickers_param = params.get('tickers', [None])[0]
 
-        articles = []
-        source = 'mock'
-
-        try:
-            if action == 'market' or (not ticker and not tickers_param):
-                # Market-wide news from RSS
-                rss_articles = fetch_rss_news()
-                if rss_articles:
-                    articles = rss_articles
-                    source = 'rss'
-                else:
-                    articles = get_mock_news()
-                    source = 'mock'
-
-            elif tickers_param:
-                # Batch: multiple tickers
-                ticker_list = [t.strip() for t in tickers_param.split(',')]
-                # Get TCBS news for each + RSS
-                for t in ticker_list[:5]:
-                    tcbs = fetch_tcbs_news(t)
-                    articles.extend(tcbs)
-                rss = fetch_rss_news()
-                articles.extend(rss)
-                if articles:
-                    source = 'tcbs+rss'
-                else:
-                    articles = get_mock_news()
-                    source = 'mock'
-
-            elif ticker:
-                # Single ticker
-                tcbs = fetch_tcbs_news(ticker)
-                rss = fetch_rss_news()
-                # Filter RSS by ticker
-                rss_filtered = [a for a in rss if ticker in a.get('relatedTickers', [])]
-                articles = tcbs + rss_filtered + [a for a in rss if ticker not in a.get('relatedTickers', [])]
-                if articles:
-                    source = 'tcbs+rss' if tcbs else 'rss'
-                else:
-                    articles = get_mock_news(ticker)
-                    source = 'mock'
-
-        except Exception:
-            articles = get_mock_news(ticker)
-            source = 'mock'
-
-        # Deduplicate by title hash
-        seen = set()
-        unique = []
-        for a in articles:
-            h = hashlib.md5(a.get('title', '').encode()).hexdigest()[:12]
-            if h not in seen:
-                seen.add(h)
-                unique.append(a)
-        articles = unique[:15]
-
-        # Aggregate sentiment
-        sentiment = aggregate_sentiment(articles, ticker)
-
-        result = {
-            'articles': articles,
-            'sentiment': sentiment,
-            'source': source,
-        }
+        result = get_news(ticker=ticker, tickers=tickers_param, action=action)
 
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
