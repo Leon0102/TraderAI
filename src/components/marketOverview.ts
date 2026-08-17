@@ -19,15 +19,25 @@ export function renderMarketCards(data: any[], marketCtx?: MarketContext) {
     const advances = index.advances || Math.floor(Math.random() * 200 + 100);
     const declines = index.declines || Math.floor(Math.random() * 150 + 80);
     const unchanged = index.unchanged || Math.floor(Math.random() * 50 + 20);
+    const adTotal = advances + declines + unchanged || 1;
+    const advPct = (advances / adTotal) * 100;
+    const decPct = (declines / adTotal) * 100;
+    const uncPct = (unchanged / adTotal) * 100;
 
     return `
       <div class="market-card ${direction}" data-ticker="${index.ticker}">
-        <div class="market-card-name">${name}</div>
+        <div class="market-card-top">
+          <div class="market-card-name">${name}</div>
+          <span class="market-card-arrow-badge ${direction}">${arrow} ${sign}${pctChange.toFixed(2)}%</span>
+        </div>
         <div class="market-card-value">${close.toFixed(2)}</div>
-        <div class="market-card-change">
-          <span class="arrow">${arrow}</span>
-          <span>${sign}${change.toFixed(2)}</span>
-          <span>(${sign}${pctChange.toFixed(2)}%)</span>
+        <div class="market-card-change ${direction}">
+          <span>${sign}${change.toFixed(2)} điểm</span>
+        </div>
+        <div class="ad-bar" title="${advances} tăng / ${declines} giảm / ${unchanged} đứng giá">
+          <div class="ad-bar-seg ad-up" style="width:${advPct}%"></div>
+          <div class="ad-bar-seg ad-flat" style="width:${uncPct}%"></div>
+          <div class="ad-bar-seg ad-down" style="width:${decPct}%"></div>
         </div>
         <div class="market-card-stats">
           <div class="stat">
@@ -35,12 +45,12 @@ export function renderMarketCards(data: any[], marketCtx?: MarketContext) {
             <span class="stat-value">${advances}</span>
           </div>
           <div class="stat">
-            <span style="color: var(--red)">▼</span>
-            <span class="stat-value">${declines}</span>
-          </div>
-          <div class="stat">
             <span style="color: var(--yellow)">●</span>
             <span class="stat-value">${unchanged}</span>
+          </div>
+          <div class="stat">
+            <span style="color: var(--red)">▼</span>
+            <span class="stat-value">${declines}</span>
           </div>
         </div>
       </div>
