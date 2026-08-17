@@ -179,6 +179,33 @@
       </div>
     </section>
 
+    <!-- Capital Allocator -->
+    <section class="section" id="allocator">
+      <div class="container">
+        <h2 class="section-title">
+          <span class="section-icon">💰</span>
+          Phân Bổ Vốn Đầu Tư
+        </h2>
+        <p class="allocator-intro">Nhập số vốn bạn có, hệ thống sẽ đề xuất mua bao nhiêu cổ phiếu (theo lô 100) ở các mã đang có tín hiệu MUA mạnh nhất từ phân tích Tổng Hợp ở trên.</p>
+
+        <div class="allocator-form">
+          <div class="allocator-input-wrapper">
+            <input type="text" inputmode="numeric" id="capitalInput" class="allocator-input" placeholder="Ví dụ: 50,000,000" />
+            <span class="allocator-input-suffix">đ</span>
+          </div>
+          <div class="capital-presets">
+            <button class="capital-preset" data-amount="10000000">10tr</button>
+            <button class="capital-preset" data-amount="50000000">50tr</button>
+            <button class="capital-preset" data-amount="100000000">100tr</button>
+            <button class="capital-preset" data-amount="500000000">500tr</button>
+          </div>
+          <button class="btn-allocate" id="allocateBtn">Phân bổ vốn</button>
+        </div>
+
+        <div id="allocationResult" class="allocation-result"></div>
+      </div>
+    </section>
+
     <!-- Chart Section -->
     <section class="section" id="chart">
       <div class="container">

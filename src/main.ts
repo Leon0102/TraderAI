@@ -6,7 +6,8 @@ import { fetchMarketOverview, fetchTopStocks, fetchStockBars, fetchMultipleFinan
 import { renderMarketCards, renderHeroQuickStats } from './components/marketOverview';
 import { initStockTable, renderStockTable } from './components/stockTable';
 import { initChart, updateChartData } from './components/stockChart';
-import { renderShortTermSuggestions, renderLongTermSuggestions, renderCombinedSuggestions, setMarketContext, setNewsSignals } from './components/suggestions';
+import { renderShortTermSuggestions, renderLongTermSuggestions, renderCombinedSuggestions, setMarketContext, setNewsSignals, getCombinedSignals } from './components/suggestions';
+import { setAllocatorSignals, initCapitalAllocator } from './components/capitalAllocator';
 import { analyzeShortTerm } from './analysis/technicalAnalysis';
 import { rankForLongTerm } from './analysis/fundamentalAnalysis';
 import { analyzeMarket } from './analysis/marketAnalysis';
@@ -120,9 +121,31 @@ async function loadSuggestions() {
     renderShortTermSuggestions(techSignals);
     renderLongTermSuggestions(fundSignals);
     renderCombinedSuggestions(techSignals, fundSignals);
+    const combined = getCombinedSignals(techSignals, fundSignals);
+    setAllocatorSignals(combined);
+    updateChartRecommendedOptgroup(combined);
   } catch (e) {
     console.error('Suggestions error:', e);
   }
+}
+
+// Surfaces today's actual top BUY candidates at the top of the chart symbol
+// picker, instead of only ever offering a fixed, generic VN30/bank list.
+function updateChartRecommendedOptgroup(combined: ReturnType<typeof getCombinedSignals>) {
+  const select = document.getElementById('chartSymbol') as HTMLSelectElement | null;
+  if (!select) return;
+
+  const top = combined.filter(c => c.combinedScore >= 60).slice(0, 6);
+  if (top.length === 0) return;
+
+  let group = select.querySelector('optgroup[data-recommended]') as HTMLOptGroupElement | null;
+  if (!group) {
+    group = document.createElement('optgroup');
+    group.dataset.recommended = 'true';
+    group.label = '⭐ Đáng đầu tư hôm nay';
+    select.insertBefore(group, select.firstChild);
+  }
+  group.innerHTML = top.map(c => `<option value="${c.ticker}">${c.ticker} (${c.combinedScore}/100)</option>`).join('');
 }
 
 async function loadNewsFeed() {
@@ -172,6 +195,7 @@ async function init() {
   initSearchBar();
   initStockTable();
   initChart();
+  initCapitalAllocator();
 
   // Setup suggestion tabs
   document.querySelectorAll('#suggestionTabs .tab').forEach(tab => {

@@ -21,6 +21,29 @@ export function setNewsSignals(signals: Map<string, NewsSignal>) {
   newsSignals = signals;
 }
 
+export interface CombinedSignal {
+  ticker: string;
+  techSignal: TechnicalSignal;
+  fundSignal: FundamentalSignal | undefined;
+  newsSignal: NewsSignal | undefined;
+  combinedScore: number;
+}
+
+// Shared by the combined-view cards and the capital allocator, so both use
+// the exact same weighting/scoring instead of two copies drifting apart.
+export function getCombinedSignals(techSignals: TechnicalSignal[], fundSignals: FundamentalSignal[]): CombinedSignal[] {
+  const weights = currentMarketContext ? getMarketWeights(currentMarketContext) : { techWeight: 0.4, fundWeight: 0.6, riskPenalty: 0 };
+
+  return techSignals.map(tech => {
+    const fund = fundSignals.find(f => f.ticker === tech.ticker);
+    const news = newsSignals.get(tech.ticker);
+    const newsBoost = news ? news.impactModifier * 0.3 : 0;
+    const rawScore = Math.round(tech.strength * weights.techWeight + (fund?.score ?? 50) * weights.fundWeight + newsBoost);
+    const combinedScore = Math.max(0, Math.min(100, rawScore - weights.riskPenalty));
+    return { ticker: tech.ticker, techSignal: tech, fundSignal: fund, newsSignal: news, combinedScore };
+  }).sort((a, b) => b.combinedScore - a.combinedScore);
+}
+
 export function renderShortTermSuggestions(signals: TechnicalSignal[]) {
   const container = document.getElementById('shortTermCards');
   if (!container) return;
@@ -192,15 +215,7 @@ export function renderCombinedSuggestions(techSignals: TechnicalSignal[], fundSi
   if (!container) return;
 
   const weights = currentMarketContext ? getMarketWeights(currentMarketContext) : { techWeight: 0.4, fundWeight: 0.6, riskPenalty: 0 };
-
-  const combined = techSignals.map(tech => {
-    const fund = fundSignals.find(f => f.ticker === tech.ticker);
-    const news = newsSignals.get(tech.ticker);
-    const newsBoost = news ? news.impactModifier * 0.3 : 0;
-    const rawScore = Math.round(tech.strength * weights.techWeight + (fund?.score ?? 50) * weights.fundWeight + newsBoost);
-    const combinedScore = Math.max(0, Math.min(100, rawScore - weights.riskPenalty));
-    return { ticker: tech.ticker, techSignal: tech, fundSignal: fund, newsSignal: news, combinedScore };
-  }).sort((a, b) => b.combinedScore - a.combinedScore);
+  const combined = getCombinedSignals(techSignals, fundSignals);
 
   const marketBadge = currentMarketContext
     ? `<div class="market-context-badge combined-market-badge">
