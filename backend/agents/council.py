@@ -49,8 +49,11 @@ class AgentCouncil:
         self.provider = normalize_provider(provider)
         self.api_key = resolve_api_key(self.provider, api_key)
         self.model = model or DEFAULT_MODELS.get(self.provider)
-        # Once the LLM fails (bad key, quota), stop retrying for the remaining agents.
+        # A permanent failure (bad key, unknown model) disables the LLM for the rest
+        # of the session; transient ones only fall back for the agent that hit them.
         self._llm_error: Optional[str] = None if self.api_key else "no_api_key"
+        self._transient_failures = 0
+        self._last_error: Optional[str] = None
 
     @property
     def mode(self) -> str:
@@ -69,7 +72,14 @@ class AgentCouncil:
                 )
                 return {"content": text, "engine": f"{self.provider}:{self.model}"}
             except LLMError as e:
-                self._llm_error = str(e)
+                if e.retryable:
+                    self._transient_failures += 1
+                    # Give up on the LLM only if the provider keeps failing.
+                    if self._transient_failures >= 3:
+                        self._llm_error = str(e)
+                else:
+                    self._llm_error = str(e)
+                self._last_error = str(e)
                 print(f"[AgentCouncil] {role}: {e} — falling back to heuristic")
         return {"content": generate_heuristic_response(role, context), "engine": "heuristic"}
 
@@ -209,8 +219,9 @@ class AgentCouncil:
             "engine": decision["engine"],
             "structured": parse_decision(decision["content"], tech.get("price") or 0),
         }
-        if self._llm_error and self._llm_error != "no_api_key":
-            yield {"type": "warning", "message": f"LLM gặp lỗi, đã chuyển sang chế độ Heuristic: {self._llm_error}"}
+        if self._last_error:
+            scope = "đã chuyển hẳn sang chế độ Heuristic" if self._llm_error else "một số agent dùng chế độ Heuristic"
+            yield {"type": "warning", "message": f"LLM gặp lỗi, {scope}: {self._last_error}"}
 
     def run_council(self, ticker: str) -> Dict[str, Any]:
         """Run full council deliberation and return complete JSON."""

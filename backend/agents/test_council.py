@@ -12,7 +12,8 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from backend.agents.council import AgentCouncil, parse_decision, validate_ticker  # noqa: E402
-from backend.agents.llm import resolve_api_key, generate_heuristic_response  # noqa: E402
+from backend.agents import llm as llm_module  # noqa: E402
+from backend.agents.llm import LLMError, resolve_api_key, generate_heuristic_response  # noqa: E402
 
 REQUIRED_AGENTS = {"technical", "fundamental", "sentiment", "bull", "bear"}
 
@@ -79,6 +80,58 @@ def test_heuristic_sell_on_weak_context():
     }
     verdict = parse_decision(generate_heuristic_response("portfolio_manager", ctx), 10000)
     assert verdict["action"] == "BÁN", verdict
+
+
+def test_transient_llm_error_retries_then_keeps_llm_for_later_agents():
+    """A 503 must not knock every remaining agent down to heuristic."""
+    calls = []
+    original = llm_module.call_llm
+    original_backoff = llm_module.RETRY_BACKOFF_SECONDS
+    llm_module.RETRY_BACKOFF_SECONDS = (0, 0)
+
+    def fake_call_llm(**kwargs):
+        calls.append(kwargs)
+        if len(calls) <= 1:  # first agent only (call_llm already exhausted its own retries)
+            raise LLMError("Gemini lỗi: 503 UNAVAILABLE high demand", retryable=True)
+        return "Báo cáo giả lập."
+
+    import backend.agents.council as council_module
+    council_module.call_llm = fake_call_llm
+    try:
+        c = AgentCouncil(provider="gemini", api_key="k")
+        ctx = {"ticker": "AAA", "technicals": {}, "fundamentals": {}, "news_sentiment": {}}
+        first = c._execute_agent("technical", "sys", "user", ctx)
+        second = c._execute_agent("fundamental", "sys", "user", ctx)
+        assert first["engine"] == "heuristic", first
+        assert second["engine"].startswith("gemini"), second
+        assert c.mode == "llm"
+
+        permanent = AgentCouncil(provider="gemini", api_key="k")
+        council_module.call_llm = lambda **kw: (_ for _ in ()).throw(LLMError("API key not valid", retryable=False))
+        permanent._execute_agent("technical", "sys", "user", ctx)
+        assert permanent.mode == "heuristic", "a bad key must disable the LLM"
+    finally:
+        council_module.call_llm = original
+        llm_module.RETRY_BACKOFF_SECONDS = original_backoff
+
+
+def test_llm_retries_transient_errors():
+    attempts = {"n": 0}
+    original_once = llm_module._call_llm_once
+    llm_module.RETRY_BACKOFF_SECONDS = (0, 0)
+
+    def flaky(*a, **kw):
+        attempts["n"] += 1
+        if attempts["n"] < 3:
+            raise LLMError("503 overloaded", retryable=True)
+        return "ok"
+
+    llm_module._call_llm_once = flaky
+    try:
+        assert llm_module.call_llm("p", "s", "gemini", "k") == "ok"
+        assert attempts["n"] == 3
+    finally:
+        llm_module._call_llm_once = original_once
 
 
 def run_live(ticker: str, provider: str = "gemini", api_key=None):

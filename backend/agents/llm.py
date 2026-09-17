@@ -4,6 +4,7 @@ Supports Google Gemini, OpenAI, and a quantitative heuristic fallback.
 """
 
 import os
+import time
 from typing import Optional, Dict, Any, List, Tuple
 
 DEFAULT_MODELS = {
@@ -16,7 +17,28 @@ ENV_KEYS = {"gemini": "GEMINI_API_KEY", "openai": "OPENAI_API_KEY"}
 
 
 class LLMError(Exception):
-    pass
+    """retryable=True for transient provider problems (overload, rate limit, network),
+    False for ones that will keep failing (bad key, unknown model, missing library)."""
+
+    def __init__(self, message: str, retryable: bool = False):
+        super().__init__(message)
+        self.retryable = retryable
+
+
+# Substrings marking a transient failure, matched against the provider's error text.
+_TRANSIENT_MARKERS = (
+    "503", "502", "504", "429", "overload", "unavailable", "high demand",
+    "rate limit", "quota", "timeout", "timed out", "connection", "internal error", "500",
+)
+
+
+def _is_transient(message: str) -> bool:
+    lowered = message.lower()
+    return any(marker in lowered for marker in _TRANSIENT_MARKERS)
+
+
+MAX_ATTEMPTS = 3
+RETRY_BACKOFF_SECONDS = (2, 5)
 
 
 def normalize_provider(provider: Optional[str]) -> str:
@@ -44,7 +66,27 @@ def call_llm(
     api_key: Optional[str] = None,
     model: Optional[str] = None,
 ) -> str:
-    """Invoke an LLM. Raises LLMError on any failure so callers can fall back and report why."""
+    """Invoke an LLM, retrying transient provider failures (503/429/timeouts).
+    Raises LLMError on failure so callers can fall back and report why."""
+    last_error: Optional[LLMError] = None
+    for attempt in range(MAX_ATTEMPTS):
+        try:
+            return _call_llm_once(prompt, system_prompt, provider, api_key, model)
+        except LLMError as e:
+            last_error = e
+            if not e.retryable or attempt == MAX_ATTEMPTS - 1:
+                raise
+            time.sleep(RETRY_BACKOFF_SECONDS[min(attempt, len(RETRY_BACKOFF_SECONDS) - 1)])
+    raise last_error  # unreachable, keeps type checkers happy
+
+
+def _call_llm_once(
+    prompt: str,
+    system_prompt: str,
+    provider: str = "gemini",
+    api_key: Optional[str] = None,
+    model: Optional[str] = None,
+) -> str:
     provider = normalize_provider(provider)
     key = resolve_api_key(provider, api_key)
     if not key:
@@ -66,7 +108,8 @@ def call_llm(
             )
             text = (response.text or "").strip() if response else ""
         except Exception as e:
-            raise LLMError(f"Gemini lỗi: {_mask(str(e), key)}") from e
+            msg = _mask(str(e), key)
+            raise LLMError(f"Gemini lỗi: {msg}", retryable=_is_transient(msg)) from e
 
     elif provider == "openai":
         try:
@@ -85,12 +128,13 @@ def call_llm(
             )
             text = (resp.choices[0].message.content or "").strip() if resp.choices else ""
         except Exception as e:
-            raise LLMError(f"OpenAI lỗi: {_mask(str(e), key)}") from e
+            msg = _mask(str(e), key)
+            raise LLMError(f"OpenAI lỗi: {msg}", retryable=_is_transient(msg)) from e
     else:
         raise LLMError(f"Nhà cung cấp không hỗ trợ: {provider}")
 
     if not text:
-        raise LLMError(f"{provider} trả về nội dung rỗng")
+        raise LLMError(f"{provider} trả về nội dung rỗng", retryable=True)
     return text
 
 
