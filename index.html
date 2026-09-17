@@ -32,6 +32,7 @@
 
         <nav class="nav">
           <a href="#market" class="nav-link active" data-section="market">Thị Trường</a>
+          <a href="#agentCouncilSection" class="nav-link" data-section="council">Hội Đồng AI</a>
           <a href="#suggestions" class="nav-link" data-section="suggestions">Gợi Ý</a>
           <a href="#chart" class="nav-link" data-section="chart">Biểu Đồ</a>
         </nav>
@@ -44,6 +45,7 @@
             <span>LIVE</span>
           </div>
           <div class="last-update" id="lastUpdate">Đang tải...</div>
+          <a href="/api/auth/logout" class="logout-link" id="logoutLink" title="Đăng xuất" hidden>⎋ Đăng xuất</a>
         </div>
       </div>
     </header>
@@ -80,7 +82,7 @@
         <!-- Heatmap -->
         <h3 class="subsection-title">
           <span class="section-icon">🗺️</span>
-          Bản Đồ Thị Trường (VN30)
+          Bản Đồ Thị Trường (Top thanh khoản HOSE + HNX hôm nay)
         </h3>
         <div class="heatmap-grid" id="heatmapGrid">
           <div class="detail-loading"><div class="spinner small"></div></div>
@@ -137,6 +139,9 @@
         </div>
       </div>
     </section>
+
+    <!-- Multi-Agent Investment Council (TradingAgents) -->
+    <section class="section" id="agentCouncilSection"></section>
 
     <!-- Investment Suggestions -->
     <section class="section section-dark" id="suggestions">

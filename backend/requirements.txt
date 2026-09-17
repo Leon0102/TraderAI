@@ -7,3 +7,5 @@ lxml
 pandas
 packaging
 ipython
+google-genai
+openai

@@ -22,7 +22,12 @@ export function openStockDetail(ticker: string) {
   overlay.innerHTML = `
     <div class="detail-panel">
       <div class="detail-header">
-        <h2 class="detail-ticker">${ticker}</h2>
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <h2 class="detail-ticker">${ticker}</h2>
+          <button class="btn-detail-council" id="detailLaunchCouncil" style="background: rgba(99, 102, 241, 0.2); border: 1px solid rgba(99, 102, 241, 0.4); color: #818cf8; padding: 4px 12px; border-radius: 8px; font-size: 0.8rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+            🤖 Hội Đồng AI
+          </button>
+        </div>
         <button class="detail-close" id="detailClose">✕</button>
       </div>
       <div class="detail-body" id="detailBody">
@@ -39,6 +44,12 @@ export function openStockDetail(ticker: string) {
 
   // Close handlers
   document.getElementById('detailClose')?.addEventListener('click', closeStockDetail);
+  document.getElementById('detailLaunchCouncil')?.addEventListener('click', () => {
+    closeStockDetail();
+    if (window.openCouncilForTicker) {
+      window.openCouncilForTicker(ticker);
+    }
+  });
   overlay.addEventListener('click', (e) => {
     if ((e.target as HTMLElement).classList.contains('detail-overlay')) closeStockDetail();
   });

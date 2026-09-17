@@ -1,7 +1,12 @@
 {
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
+  "functions": {
+    "api/agents.py": { "maxDuration": 60 },
+    "api/stocks.py": { "maxDuration": 30 }
+  },
   "rewrites": [
+    { "source": "/api/agents/:action", "destination": "/api/agents?action=:action" },
     { "source": "/api/(.*)", "destination": "/api/$1" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]

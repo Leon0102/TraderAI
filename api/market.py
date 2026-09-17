@@ -11,20 +11,21 @@ import sys, os
 sys.path.insert(0, os.path.dirname(__file__))
 from _tcbs import tcbs_get
 from _vci import quote_history
+import _dnse
+import _ssi
 
-# TCBS's Cloudflare bot challenge blocks direct calls from our datacenter IP.
-# VCI (a different provider) has been verified to still work from there, so
-# it's tried first; TCBS direct, then mock data, remain as fallbacks.
+# Provider order: DNSE (fast, not throttled), VCI, TCBS (Cloudflare-blocked on
+# datacenter IPs), then mock data as the last resort.
 INDEX_SYMBOLS = {"VNINDEX": "VN-Index", "HNXINDEX": "HNX-Index", "UPCOMINDEX": "UPCOM"}
 
 
-def _get_market_overview_vci() -> list:
+def _get_market_overview_bars(fetch) -> list:
     results = []
     start = (datetime.now() - timedelta(days=10)).strftime('%Y-%m-%d')
     end = datetime.now().strftime('%Y-%m-%d')
     for symbol, name in INDEX_SYMBOLS.items():
         try:
-            bars = quote_history(symbol, start, end)
+            bars = fetch(symbol, start, end)
             if not bars:
                 continue
             last = bars[-1]
@@ -42,11 +43,26 @@ def _get_market_overview_vci() -> list:
     return results
 
 
+def _attach_breadth(results: list) -> None:
+    """Fill advances/declines/unchanged per index from SSI's whole-exchange price board."""
+    exchange_for_index = {"VNINDEX": "hose", "HNXINDEX": "hnx", "UPINDEX": "upcom"}
+    for row in results:
+        ex = exchange_for_index.get(row["ticker"])
+        stocks = _ssi.all_stocks((ex,)) if ex else []
+        traded = [s for s in stocks if s["volume"] > 0]
+        if traded:
+            row["advances"] = sum(1 for s in traded if s["change"] > 0)
+            row["declines"] = sum(1 for s in traded if s["change"] < 0)
+            row["unchanged"] = len(traded) - row["advances"] - row["declines"]
+
+
 def get_market_overview() -> dict:
     """VN-Index / HNX-Index / UPCOM snapshot. source is 'vci'/'tcbs' for real data, 'mock' for demo fallback."""
-    vci_results = _get_market_overview_vci()
-    if vci_results:
-        return {"data": vci_results, "source": "vci"}
+    for source, fetch in (("dnse", _dnse.quote_history), ("vci", quote_history)):
+        results = _get_market_overview_bars(fetch)
+        if results:
+            _attach_breadth(results)
+            return {"data": results, "source": source}
 
     data = tcbs_get("/stock-insight/v1/stock/second-tc-price?tickers=VNINDEX,HNXINDEX,UPINDEX")
 
@@ -83,15 +99,15 @@ def get_market_analysis() -> dict:
     """VN-Index historical bars + sector performance for market regime analysis."""
     result = {"vnindexHistory": [], "sectors": [], "source": "mock"}
 
-    vci_bars = quote_history(
-        'VNINDEX',
-        (datetime.now() - timedelta(days=150)).strftime('%Y-%m-%d'),
-        datetime.now().strftime('%Y-%m-%d'),
-    )
-    if vci_bars:
-        result["vnindexHistory"] = vci_bars
-        result["source"] = "vci"
-    else:
+    start = (datetime.now() - timedelta(days=150)).strftime('%Y-%m-%d')
+    end = datetime.now().strftime('%Y-%m-%d')
+    for source, fetch in (("dnse", _dnse.quote_history), ("vci", quote_history)):
+        bars = fetch('VNINDEX', start, end)
+        if bars:
+            result["vnindexHistory"] = bars
+            result["source"] = source
+            break
+    if not result["vnindexHistory"]:
         to_ts = int(time.time())
         from_ts = int((datetime.now() - timedelta(days=150)).timestamp())
         hist_data = tcbs_get(
@@ -148,22 +164,8 @@ def get_market_analysis() -> dict:
             base = c
         result["vnindexHistory"] = bars
 
-    # Mock fallback for sectors
-    if not result["sectors"]:
-        mock_sectors = [
-            "Ngân hàng", "Bất động sản", "Chứng khoán", "Thép",
-            "Thực phẩm", "Dầu khí", "CNTT", "Bán lẻ",
-            "Điện", "Xây dựng", "Hóa chất", "Dệt may"
-        ]
-        result["sectors"] = [
-            {"name": s, "change": round(random.uniform(-3, 3), 2),
-             "volume": random.randint(10000000, 200000000),
-             "advances": random.randint(3, 20),
-             "declines": random.randint(3, 15),
-             "marketCap": random.randint(50000, 500000)}
-            for s in mock_sectors
-        ]
-
+    # No real sector feed is reachable without TCBS: return none rather than
+    # random numbers, which would silently skew the market-health score.
     return result
 
 

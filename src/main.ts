@@ -16,6 +16,13 @@ import { initSearchBar } from './components/searchBar';
 import { renderWatchlist } from './components/watchlist';
 import { renderHeatmap } from './components/heatmap';
 import { renderNewsFeed } from './components/newsFeed';
+import { initAgentCouncil, openCouncilForTicker } from './components/agentCouncil';
+
+declare global {
+  interface Window {
+    openCouncilForTicker?: (ticker: string) => void;
+  }
+}
 
 // ===========================
 // State
@@ -196,6 +203,11 @@ async function init() {
   initStockTable();
   initChart();
   initCapitalAllocator();
+  initAgentCouncil();
+  // Login only exists on the deployed site (Vercel middleware), not the local dev server
+  const logoutLink = document.getElementById('logoutLink');
+  if (logoutLink && !['localhost', '127.0.0.1'].includes(location.hostname)) logoutLink.hidden = false;
+  window.openCouncilForTicker = openCouncilForTicker;
 
   // Setup suggestion tabs
   document.querySelectorAll('#suggestionTabs .tab').forEach(tab => {

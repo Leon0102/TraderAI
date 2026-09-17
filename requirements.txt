@@ -1,3 +1,6 @@
 requests
 beautifulsoup4
 lxml
+# Agent Council LLM providers (imported lazily; heuristic mode works without them)
+google-genai
+openai

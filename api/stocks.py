@@ -1,21 +1,34 @@
 """Vercel serverless function: /api/stocks"""
 from http.server import BaseHTTPRequestHandler
 import json
+import math
+import threading
 import warnings
 warnings.filterwarnings('ignore')
 
 from datetime import datetime, timedelta
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 
 import sys, os
 sys.path.insert(0, os.path.dirname(__file__))
+from _cache import cache_get, cache_set
 from _tcbs import tcbs_get
-from _vci import price_board, quote_history
+from _vci import price_board as vci_price_board
+import _dnse
+import _ssi
 
-# TCBS's Cloudflare bot challenge blocks our datacenter IP; VCI (a different
-# provider) has been verified to still work. It has no "top volume" screener
-# on the free tier, so we price-board a fixed basket of liquid HOSE tickers
-# ourselves and rank by traded volume.
+# Today's top stocks are picked from the WHOLE of HOSE + HNX via SSI's price
+# board (one request per exchange), not a fixed basket. UPCoM is left out of
+# the ranking: it is dominated by thin, easily-moved names.
+RANK_EXCHANGES = ("hose", "hnx")
+# Minimum matched value (VND) to count as investable liquidity for the day.
+MIN_TRADED_VALUE = 10_000_000_000
+# How many of the most-traded stocks get an RVOL computed (one DNSE call each, ~100ms).
+RVOL_CANDIDATE_COUNT = 60
+RVOL_LOOKBACK_DAYS = 20
+
+# Only used when the live whole-market board is unavailable (SSI down, or
+# before the first match of a new session when traded values are still 0).
 LIQUID_UNIVERSE = [
     'FPT', 'VNM', 'VIC', 'VHM', 'HPG', 'MWG', 'TCB', 'MSN', 'VCB', 'ACB',
     'SSI', 'VPB', 'STB', 'GAS', 'PLX', 'DGC', 'PNJ', 'REE', 'MBB', 'CTG',
@@ -23,61 +36,103 @@ LIQUID_UNIVERSE = [
     'GVR', 'BCM', 'PDR', 'NVL', 'KDH', 'DXG', 'HSG', 'NKG', 'DPM', 'DCM',
 ]
 
-# How many raw-top-volume candidates to compute RVOL for. Each one costs an
-# extra history call, so this trades off ranking quality vs. request latency.
-RVOL_CANDIDATE_COUNT = 15
-RVOL_LOOKBACK_DAYS = 20
-
 
 def _attach_rvol(candidates: list) -> None:
-    """Mutates each candidate dict in place, adding an 'rvol' field: today's
-    volume divided by the average of the prior RVOL_LOOKBACK_DAYS days.
-    A raw top-volume list is dominated by a handful of always-liquid large
-    caps; RVOL instead surfaces stocks trading unusually heavily *for them*,
-    which is a much stronger signal of fresh buying/selling interest.
-    """
-    start = (datetime.now() - timedelta(days=RVOL_LOOKBACK_DAYS * 2)).strftime('%Y-%m-%d')
+    """Adds 'rvol' to each candidate in place: today's volume / average of the
+    prior RVOL_LOOKBACK_DAYS sessions. A raw most-traded list is dominated by
+    always-liquid large caps; RVOL surfaces stocks trading unusually heavily
+    *for them* — fresh buying/selling interest."""
+    start = (datetime.now() - timedelta(days=RVOL_LOOKBACK_DAYS * 2 + 10)).strftime('%Y-%m-%d')
     end = datetime.now().strftime('%Y-%m-%d')
 
-    def fetch(ticker: str):
+    def fetch(c: dict):
         try:
-            bars = quote_history(ticker, start, end)
-            return ticker, bars
+            return c['ticker'], _dnse.quote_history(c['ticker'], start, end)
         except Exception:
-            return ticker, []
+            return c['ticker'], []
 
-    with ThreadPoolExecutor(max_workers=len(candidates)) as pool:
-        futures = [pool.submit(fetch, c['ticker']) for c in candidates]
-        bars_by_ticker = dict(f.result() for f in as_completed(futures))
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        bars_by_ticker = dict(pool.map(fetch, candidates))
 
     for c in candidates:
         bars = bars_by_ticker.get(c['ticker']) or []
-        # Exclude the most recent bar (today) from the baseline average.
-        history = bars[-(RVOL_LOOKBACK_DAYS + 1):-1] if len(bars) > 1 else []
+        # Keep today's bar out of the baseline, whether or not DNSE already has it.
+        trading_date = c.get('tradingDate') or ''
+        today = f"{trading_date[:4]}-{trading_date[4:6]}-{trading_date[6:]}" if len(trading_date) == 8 else end
+        history = [b for b in bars if b['tradingDate'] != today][-RVOL_LOOKBACK_DAYS:]
         avg_volume = (sum(b['volume'] for b in history) / len(history)) if history else 0
+        if not c.get('volume') and bars:
+            c['volume'] = bars[-1]['volume']  # new session not matched yet: use the last session
+        c['avgVolume20'] = int(avg_volume)
         c['rvol'] = round(c['volume'] / avg_volume, 2) if avg_volume > 0 else 1.0
 
 
-def get_top_stocks(count: int = 20) -> dict:
-    """Top stocks by relative volume (RVOL). Tries VCI first, falls back to TCBS. source: 'vci'|'tcbs'|'error'."""
-    vci_results = price_board(LIQUID_UNIVERSE)
-    if vci_results:
-        vci_results.sort(key=lambda r: r['volume'], reverse=True)
-        # RVOL needs one extra history call per candidate, so it's capped
-        # regardless of `count` to keep request latency in check. The rest
-        # of the requested rows stay ranked by raw volume (rvol defaults to
-        # a neutral 1.0 for them, set below).
-        rvol_candidates = vci_results[:RVOL_CANDIDATE_COUNT]
-        _attach_rvol(rvol_candidates)
-        rvol_candidates.sort(key=lambda r: r['rvol'], reverse=True)
+def _score(c: dict) -> float:
+    """Rank = unusual activity (RVOL, capped so one spike can't dominate) weighted
+    by liquidity (log of traded value), with a small tilt toward stocks closing up."""
+    rvol = min(c.get('rvol') or 1.0, 4.0)
+    liquidity = math.log10(max(c.get('value') or 0, 1e9))  # 9 (1 tỷ) .. ~12.5 (3,000 tỷ)
+    momentum = max(min(c.get('pctChange') or 0, 7), -7) / 7   # -1 .. 1
+    return round(rvol * (liquidity - 8) * (1 + 0.25 * momentum), 3)
 
-        rest = vci_results[RVOL_CANDIDATE_COUNT:]
-        for r in rest:
-            r['rvol'] = 1.0
-        return {"data": (rvol_candidates + rest)[:count], "source": "vci"}
+
+def _rank(candidates: list, count: int) -> list:
+    _attach_rvol(candidates)
+    for c in candidates:
+        c['score'] = _score(c)
+    candidates.sort(key=lambda c: c['score'], reverse=True)
+    return candidates[:count]
+
+
+MAX_COUNT = 50
+_RANKING_TTL = 30
+_ranking_lock = threading.Lock()
+
+
+def get_top_stocks(count: int = 20) -> dict:
+    """Today's top stocks across HOSE + HNX. The page requests this several times
+    concurrently on load (table, heatmap, suggestions, council), so the ranking is
+    computed once under a lock and served from a short cache for every `count`."""
+    count = max(1, min(count, MAX_COUNT))
+    with _ranking_lock:
+        cached = cache_get("stocks:top")
+        if cached is None:
+            cached = _compute_top_stocks(MAX_COUNT)
+            if cached["data"]:
+                cache_set("stocks:top", cached, _RANKING_TTL)
+    return {**cached, "data": cached["data"][:count]}
+
+
+def _compute_top_stocks(count: int) -> dict:
+    """source: 'ssi'|'vci'|'tcbs'|'error'."""
+    board = _ssi.all_stocks(RANK_EXCHANGES)
+    liquid = [s for s in board if (s.get('value') or 0) >= MIN_TRADED_VALUE and s.get('close')]
+    if len(liquid) >= 10:
+        liquid.sort(key=lambda s: s['value'], reverse=True)
+        return {"data": _rank(liquid[:max(RVOL_CANDIDATE_COUNT, count)], count), "source": "ssi",
+                "universe": len(board)}
+
+    # Board reachable but session hasn't matched yet: rank the liquid basket on last-session data.
+    if board:
+        basket = _ssi.price_board(LIQUID_UNIVERSE)
+        if basket:
+            for s in basket:
+                s['value'] = 0
+            ranked = _rank(basket, count)
+            for s in ranked:
+                s['value'] = int(s['volume'] * s['close'] * 1000)
+                s['score'] = _score(s)
+            ranked.sort(key=lambda c: c['score'], reverse=True)
+            return {"data": ranked, "source": "ssi", "universe": len(board)}
+
+    vci_results = vci_price_board(LIQUID_UNIVERSE)
+    if vci_results:
+        for s in vci_results:
+            s['value'] = int(s['volume'] * s['close'] * 1000)
+        vci_results.sort(key=lambda r: r['value'], reverse=True)
+        return {"data": _rank(vci_results[:RVOL_CANDIDATE_COUNT], count), "source": "vci"}
 
     data = tcbs_get(f"/stock-insight/v1/stock/top-stock?exchange=HOSE&type=volume&count={count}")
-
     if data and "data" in data:
         results = []
         for item in data["data"]:
@@ -93,16 +148,29 @@ def get_top_stocks(count: int = 20) -> dict:
     return {"data": [], "source": "error"}
 
 
+def get_symbols() -> dict:
+    """Every listed common stock (HOSE, HNX, UPCoM) for search/autocomplete."""
+    rows = _ssi.all_stocks()
+    symbols = sorted(
+        ({"ticker": r["ticker"], "name": r["companyName"], "exchange": r["exchange"]} for r in rows),
+        key=lambda r: r["ticker"],
+    )
+    return {"data": symbols, "total": len(symbols), "source": "ssi" if symbols else "error"}
+
+
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         from urllib.parse import parse_qs, urlparse
         params = parse_qs(urlparse(self.path).query)
-        count = int(params.get('count', ['20'])[0])
 
-        result = get_top_stocks(count)
+        if params.get('action', [None])[0] == 'symbols':
+            result = get_symbols()
+        else:
+            count = int(params.get('count', ['20'])[0])
+            result = get_top_stocks(count)
 
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Access-Control-Allow-Origin', '*')
         self.end_headers()
-        self.wfile.write(json.dumps(result).encode())
+        self.wfile.write(json.dumps(result, ensure_ascii=False).encode())

@@ -105,7 +105,7 @@ interface PriceScenario {
 const API_BASE = '/api';
 
 // Real (non-mock) source labels returned by the backend for each endpoint.
-const REAL_SOURCES = new Set(['tcbs', 'vnstock', 'vci', 'rss', 'tcbs+rss']);
+const REAL_SOURCES = new Set(['tcbs', 'vnstock', 'vci', 'ssi', 'dnse', 'rss', 'tcbs+rss']);
 
 // Tracks, per feed, whether the data currently shown is real or fallback/mock.
 // Read this from the UI to warn users when the dashboard is showing demo data.
@@ -124,6 +124,13 @@ export function isAnyDataMock(): boolean {
 // source and fail a handful of requests even though the source is fine
 // moments later. One retry after a short pause recovers most of those
 // instead of silently falling back to mock data.
+/** The deployed site sits behind a login; an expired session makes every API call 401. */
+export function redirectToLoginIfUnauthorized(res: Response): void {
+  if (res.status === 401 && !location.pathname.startsWith('/login')) {
+    location.href = `/login?next=${encodeURIComponent(location.pathname + location.search)}`;
+  }
+}
+
 async function apiFetch(path: string, retries = 1): Promise<any> {
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
@@ -132,6 +139,10 @@ async function apiFetch(path: string, retries = 1): Promise<any> {
       });
       if (res.ok) {
         return await res.json();
+      }
+      if (res.status === 401) {
+        redirectToLoginIfUnauthorized(res);
+        return null;
       }
     } catch (_e) {
       // Backend unavailable, fall through to retry/null
@@ -175,6 +186,24 @@ export async function fetchTopStocks(count: number = 20): Promise<any[]> {
 
   recordSource('stocks', undefined);
   return getMockTopStocks(count);
+}
+
+export interface ListedSymbol {
+  ticker: string;
+  name: string;
+  exchange: string;
+}
+
+let symbolsPromise: Promise<ListedSymbol[]> | null = null;
+
+/** Every listed stock (HOSE/HNX/UPCoM), fetched once per page load. Empty if the backend is unreachable. */
+export function fetchSymbols(): Promise<ListedSymbol[]> {
+  symbolsPromise ??= apiFetch('/stocks?action=symbols').then(data => {
+    if (data?.data?.length) return data.data as ListedSymbol[];
+    symbolsPromise = null; // allow a retry on the next call
+    return [];
+  });
+  return symbolsPromise;
 }
 
 export async function fetchMarketOverview(): Promise<any[]> {
@@ -498,6 +527,126 @@ function getMockTickerNews(ticker?: string): { articles: NewsArticle[]; sentimen
       keyEvents: [...new Set(relevant.map(a => a.eventType).filter(e => e !== 'MARKET'))],
     }
   };
+}
+
+export interface AgentCouncilVerdict {
+  action: 'MUA' | 'BÁN' | 'QUAN SÁT';
+  entry_zone: string;
+  target_price: string;
+  stop_loss: string;
+  sizing: string;
+  risk_level: string;
+  summary: string;
+}
+
+export interface AgentCouncilContext {
+  ticker: string;
+  company_name?: string;
+  exchange?: string;
+  price_limit_pct?: number;
+  ceiling?: number | null;
+  floor?: number | null;
+  price: number;
+  change_5d?: number | null;
+  rsi?: number | null;
+  pe?: number | null;
+  pb?: number | null;
+  roe?: number | null;
+  foreign_flow?: string;
+  market_context?: string;
+  news_sentiment?: { score: number; label: string; trend: string; key_events: string[] };
+  last_date?: string;
+}
+
+export type AgentRole = 'technical' | 'fundamental' | 'sentiment' | 'bull' | 'bear' | 'portfolio_manager';
+
+export interface AgentCouncilResult {
+  ticker: string;
+  timestamp: string;
+  mode: 'llm' | 'heuristic';
+  context: AgentCouncilContext;
+  reports: Partial<Record<Exclude<AgentRole, 'portfolio_manager'>, string>>;
+  engines: Partial<Record<AgentRole, string>>;
+  verdict: {
+    raw: string;
+    structured: AgentCouncilVerdict;
+  };
+  warnings: string[];
+}
+
+export type AgentCouncilEvent =
+  | { type: 'status'; message: string }
+  | { type: 'context'; data: AgentCouncilContext }
+  | { type: 'mode'; mode: 'llm' | 'heuristic'; provider: string | null; model: string | null }
+  | { type: 'agent_start'; agent: AgentRole; name: string }
+  | { type: 'agent_done'; agent: AgentRole; name: string; content: string; engine: string }
+  | { type: 'final_verdict'; agent: 'portfolio_manager'; content: string; engine: string; structured: AgentCouncilVerdict }
+  | { type: 'warning' | 'error'; message: string };
+
+export interface AgentCouncilRequest {
+  ticker: string;
+  provider?: string;
+  apiKey?: string;
+  model?: string;
+}
+
+async function agentErrorMessage(resp: Response): Promise<string> {
+  redirectToLoginIfUnauthorized(resp);
+  try {
+    const body = await resp.json();
+    if (body?.detail) return typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail);
+  } catch { /* not JSON */ }
+  return `Agent Council error: HTTP ${resp.status}`;
+}
+
+export async function fetchAgentCouncilAnalysis(req: AgentCouncilRequest): Promise<AgentCouncilResult> {
+  const resp = await fetch('/api/agents/analyze', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  });
+  if (!resp.ok) throw new Error(await agentErrorMessage(resp));
+  return resp.json();
+}
+
+/**
+ * Stream council events over a POST request (SSE framing). POST keeps the API key
+ * out of the URL, which EventSource cannot do.
+ */
+export async function streamAgentCouncil(
+  req: AgentCouncilRequest,
+  onEvent: (event: AgentCouncilEvent) => void,
+  signal?: AbortSignal
+): Promise<void> {
+  const resp = await fetch('/api/agents/stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+    body: JSON.stringify(req),
+    signal,
+  });
+  if (!resp.ok || !resp.body) throw new Error(await agentErrorMessage(resp));
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let sep: number;
+    while ((sep = buffer.indexOf('\n\n')) !== -1) {
+      const frame = buffer.slice(0, sep);
+      buffer = buffer.slice(sep + 2);
+      const data = frame
+        .split('\n')
+        .filter(line => line.startsWith('data:'))
+        .map(line => line.slice(5).trimStart())
+        .join('\n');
+      if (!data) continue;
+      if (data === '[DONE]') return;
+      onEvent(JSON.parse(data) as AgentCouncilEvent);
+    }
+  }
 }
 
 export type { StockBar, StockInfo, FinancialData, MarketAnalysisData, SectorData, NewsArticle, SentimentSummary, PriceZone, PriceScenario };

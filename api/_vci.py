@@ -42,20 +42,36 @@ INDEX_SYMBOL_MAP = {
 }
 
 
+# Vietcap's trading host throttles IPs after bursts: requests then hang until the
+# timeout instead of failing. After a timeout, skip it for a while so every
+# caller falls through to the other providers immediately.
+_TRADING_COOLDOWN_SECONDS = 180
+_trading_down_until = 0.0
+
+
+def trading_available() -> bool:
+    return time.time() >= _trading_down_until
+
+
 def _vci_post(path: str, payload: dict, ttl: float = 0) -> Optional[dict]:
+    global _trading_down_until
     cache_key = f"vci:post:{path}:{payload}"
     if ttl:
         cached = cache_get(cache_key)
         if cached is not None:
             return cached
+    if not trading_available():
+        return None
     try:
         import requests as req
-        resp = req.post(f"{TRADING_URL}{path}", headers=HEADERS, json=payload, timeout=10)
+        resp = req.post(f"{TRADING_URL}{path}", headers=HEADERS, json=payload, timeout=6)
         if resp.status_code == 200:
             data = resp.json()
             return cache_set(cache_key, data, ttl) if ttl else data
+        if resp.status_code in (403, 429):
+            _trading_down_until = time.time() + _TRADING_COOLDOWN_SECONDS
     except Exception:
-        pass
+        _trading_down_until = time.time() + _TRADING_COOLDOWN_SECONDS
     return None
 
 
@@ -142,6 +158,11 @@ def price_board(symbols: list) -> list:
                 "foreignBuyVolume": foreign_buy,
                 "foreignSellVolume": foreign_sell,
                 "foreignNetVolume": foreign_buy - foreign_sell,
+                # Exchange rules, in VND (not thousands like the prices above)
+                "board": listing.get("board") or "",
+                "ceiling": listing.get("ceiling"),
+                "floor": listing.get("floor"),
+                "refPrice": listing.get("refPrice"),
             })
         except (ValueError, TypeError):
             continue

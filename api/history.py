@@ -10,16 +10,18 @@ import sys, os
 sys.path.insert(0, os.path.dirname(__file__))
 from _tcbs import tcbs_get
 from _vci import quote_history
+import _dnse
 
 
 def get_history(ticker: str, start: str, end: str) -> dict:
-    """OHLCV bars for a ticker. Tries VCI first, falls back to TCBS. source: 'vci'|'tcbs'|'empty'."""
-    try:
-        bars = quote_history(ticker, start, end)
-        if bars:
-            return {"data": bars, "ticker": ticker, "source": "vci"}
-    except Exception:
-        pass
+    """OHLCV bars for a ticker. Tries DNSE, then VCI, then TCBS. source: 'dnse'|'vci'|'tcbs'|'empty'."""
+    for source, fetch in (("dnse", _dnse.quote_history), ("vci", quote_history)):
+        try:
+            bars = fetch(ticker, start, end)
+            if bars:
+                return {"data": bars, "ticker": ticker, "source": source}
+        except Exception:
+            pass
 
     bars = []
 
