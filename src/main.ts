@@ -22,6 +22,9 @@ import { renderNewsFeed } from './components/newsFeed';
 import { initAgentCouncil, openCouncilForTicker } from './components/agentCouncil';
 import { renderFeedMeta } from './components/provenance';
 import { setCurrentRecommendations } from './analysis/recommendation';
+import { initPortfolio, setPortfolioPrices } from './components/portfolio';
+import type { TechnicalSignal } from './analysis/technicalAnalysis';
+import type { FundamentalSignal } from './analysis/fundamentalAnalysis';
 
 declare global {
   interface Window {
@@ -37,6 +40,9 @@ let currentResolution = 'D';
 let stocksData: any[] = [];
 let refreshInterval: number | null = null;
 let marketOverviewConnected = false;
+let latestTechSignals: TechnicalSignal[] = [];
+let latestFundSignals: FundamentalSignal[] = [];
+let latestCombined: ReturnType<typeof getCombinedSignals> = [];
 // Expose market cache for potential use by other modules
 export const marketDataCache: { data: any[]; ctx: ReturnType<typeof analyzeMarket> | null } = { data: [], ctx: null };
 
@@ -92,6 +98,7 @@ async function loadStockTable() {
     const stocks = await fetchTopStocks(30);
     stocksData = stocks;
     renderStockTable(stocks);
+    setPortfolioPrices(stocks);
     renderFeedMeta('stocksProvenance', 'stocks', 'Bảng giá');
   } catch (e) {
     console.error('Stock table error:', e);
@@ -163,6 +170,9 @@ async function loadSuggestions() {
     setNewsSignals(newsSignalMap);
 
     const combined = getCombinedSignals(techSignals, fundSignals);
+    latestTechSignals = techSignals;
+    latestFundSignals = fundSignals;
+    latestCombined = combined;
     setCurrentRecommendations(combined);
     renderShortTermSuggestions(techSignals, combined);
     renderLongTermSuggestions(fundSignals, combined);
@@ -267,10 +277,29 @@ async function init() {
   initCapitalAllocator();
   initAgentCouncil();
   initDailyPicks();
+  initPortfolio();
   // Login only exists on the deployed site (Vercel middleware), not the local dev server
   const logoutLink = document.getElementById('logoutLink');
   if (logoutLink && !['localhost', '127.0.0.1'].includes(location.hostname)) logoutLink.hidden = false;
   window.openCouncilForTicker = openCouncilForTicker;
+
+  const strategyFilter = document.getElementById('strategyFilter') as HTMLSelectElement | null;
+  strategyFilter?.addEventListener('change', () => {
+    const value = strategyFilter.value;
+    const tickers = new Set(
+      value === 'swing' || value === 'position' || value === 'scalp'
+        ? latestTechSignals.filter(signal => signal.tradeType.toLowerCase() === value).map(signal => signal.ticker)
+        : value === 'value' || value === 'growth' || value === 'dividend'
+          ? latestFundSignals.filter(signal => signal.investmentType.toLowerCase() === value).map(signal => signal.ticker)
+          : value === 'buy' ? latestCombined.filter(signal => signal.decision === 'BUY').map(signal => signal.ticker) : latestCombined.map(signal => signal.ticker)
+    );
+    const tech = latestTechSignals.filter(signal => tickers.has(signal.ticker));
+    const fund = latestFundSignals.filter(signal => tickers.has(signal.ticker));
+    const combined = value === 'all' ? latestCombined : latestCombined.filter(signal => tickers.has(signal.ticker));
+    renderShortTermSuggestions(tech, combined);
+    renderLongTermSuggestions(fund, combined);
+    renderCombinedSuggestions(tech, fund);
+  });
 
   // Setup suggestion tabs
   document.querySelectorAll('#suggestionTabs .tab').forEach(tab => {

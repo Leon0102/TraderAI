@@ -8,7 +8,7 @@
   <meta name="keywords" content="chứng khoán, Việt Nam, đầu tư, cổ phiếu, VN-Index, phân tích kỹ thuật, RSI, MACD" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📈</text></svg>" />
 </head>
 <body>
@@ -41,6 +41,7 @@
           <a href="#market" class="nav-link" data-section="market">Thị Trường</a>
           <a href="#agentCouncilSection" class="nav-link" data-section="council">Hội Đồng AI</a>
           <a href="#suggestions" class="nav-link" data-section="suggestions">Gợi Ý</a>
+          <a href="#portfolio" class="nav-link" data-section="portfolio">Danh Mục</a>
           <a href="#chart" class="nav-link" data-section="chart">Biểu Đồ</a>
         </nav>
         <div class="header-right">
@@ -107,6 +108,41 @@
           <p class="section-lede">Theo dõi các mã được gắn nhãn MUA từ bản chốt đầu tiên của mỗi ngày.</p>
         </div>
         <div id="trackRecordContent" aria-live="polite"><p class="track-empty">Đang tải lịch sử đã lưu…</p></div>
+      </div>
+    </section>
+
+    <section class="section section-portfolio" id="portfolio">
+      <div class="container">
+        <div class="section-header">
+          <div class="section-heading">
+            <span class="eyebrow">Kỷ luật giao dịch</span>
+            <h2 class="section-title">Danh mục ảo &amp; cảnh báo</h2>
+            <p class="section-lede">Theo dõi giá vốn, lãi lỗ và các mốc giá ngay trên thiết bị này. Dữ liệu chưa đồng bộ lên tài khoản.</p>
+          </div>
+          <button class="btn-ghost" id="portfolioExport" type="button">Xuất CSV</button>
+        </div>
+        <div class="portfolio-grid">
+          <form class="portfolio-form" id="portfolioForm">
+            <div class="form-row">
+              <label>Mã CK<input id="portfolioTicker" maxlength="6" placeholder="FPT" required></label>
+              <label>Số lượng<input id="portfolioQty" type="number" min="1" step="1" placeholder="100" required></label>
+              <label>Giá vốn<input id="portfolioPrice" type="number" min="0.01" step="0.01" placeholder="120.00" required></label>
+              <button class="btn-primary" type="submit">Thêm vị thế</button>
+            </div>
+          </form>
+          <div class="alert-form-wrap">
+            <div class="form-row">
+              <label>Mã cảnh báo<input id="alertTicker" maxlength="6" placeholder="FPT"></label>
+              <label>Điều kiện<select id="alertType"><option value="above">Giá vượt</option><option value="below">Giá dưới</option></select></label>
+              <label>Mức giá<input id="alertValue" type="number" min="0.01" step="0.01" placeholder="130.00"></label>
+              <button class="btn-ghost" id="alertAdd" type="button">Tạo cảnh báo</button>
+            </div>
+            <p class="form-hint">Cảnh báo chỉ hiển thị trong app khi bạn đang mở trang.</p>
+          </div>
+        </div>
+        <div id="alertStatus" class="alert-status" aria-live="polite"></div>
+        <div id="portfolioContent" class="portfolio-content"></div>
+        <div id="alertList" class="alert-list"></div>
       </div>
     </section>
 
@@ -201,6 +237,7 @@
           </div>
         </div>
         <p class="data-meta" id="suggestionsProvenance">Điểm tổng hợp dùng kỹ thuật, cơ bản và tin tức; cảnh báo có thể giới hạn kết luận MUA.</p>
+        <div class="strategy-toolbar"><label for="strategyFilter">Lọc chiến lược</label><select id="strategyFilter"><option value="all">Tất cả</option><option value="swing">Swing trade</option><option value="position">Position trade</option><option value="value">Value</option><option value="growth">Growth</option><option value="dividend">Dividend</option><option value="buy">Chỉ tín hiệu MUA</option></select></div>
 
         <!-- Short Term -->
         <div class="suggestion-tab-content active" id="tab-short-term">
