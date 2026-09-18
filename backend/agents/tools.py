@@ -192,14 +192,32 @@ def get_stock_context(ticker: str) -> Dict[str, Any]:
     articles = news_resp.get("articles", []) if isinstance(news_resp, dict) else []
     sentiment = news_resp.get("sentiment", {}) if isinstance(news_resp, dict) else {}
     headlines = []
-    for a in articles[:8]:
+    corporate_events = []
+    corp_keywords = [
+        "cổ tức", "chốt quyền", "gdkhq", "không hưởng quyền",
+        "đhđcđ", "đại hội", "thưởng cổ phiếu", "phát hành", "tăng vốn", "trả cổ tức"
+    ]
+    for a in articles:
         title = (a.get("title") or "").strip()
-        if title:
-            date = (a.get("publishedAt") or "")[:10]
+        if not title:
+            continue
+        date = (a.get("publishedAt") or "")[:10]
+        event_type = a.get("eventType", "N/A")
+        t_lower = title.lower()
+
+        if len(headlines) < 8:
             headlines.append(
                 f"- [{a.get('source', '')} {date}] {title} "
-                f"(sentiment {a.get('sentiment', 0)}, {a.get('eventType', 'N/A')})"
+                f"(sentiment {a.get('sentiment', 0)}, {event_type})"
             )
+
+        if event_type in ("DIVIDEND", "EARNINGS", "INSIDER", "M&A") or any(k in t_lower for k in corp_keywords):
+            corporate_events.append({
+                "type": event_type if event_type != "N/A" else "SỰ KIỆN",
+                "title": title,
+                "date": date,
+                "source": a.get("source", ""),
+            })
 
     quote = _quote_info(ticker)
     net = quote.get("foreign_net_volume")
@@ -236,6 +254,7 @@ def get_stock_context(ticker: str) -> Dict[str, Any]:
             "market_cap": fin.get("marketCap"),
             "dividend_yield": fin.get("dividendYield"),
         },
+        "corporate_events": corporate_events[:5],
         "news_headlines": headlines,
         "news_sentiment": {
             "score": sentiment.get("overall", 0),

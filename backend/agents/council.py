@@ -121,6 +121,8 @@ class AgentCouncil:
                 "pe": fund.get("pe"),
                 "pb": fund.get("pb"),
                 "roe": fund.get("roe"),
+                "dividend_yield": fund.get("dividend_yield"),
+                "corporate_events": context.get("corporate_events", []),
                 "foreign_flow": context["foreign_flow"],
                 "market_context": context["market_context"],
                 "news_sentiment": context["news_sentiment"],
@@ -156,13 +158,16 @@ class AgentCouncil:
         )
 
         # 2. Fundamental Analyst
+        corp_evts = context.get("corporate_events", [])
+        events_str = "; ".join([f"[{e.get('date', '')}] {e.get('title', '')}" for e in corp_evts[:3]]) if corp_evts else "Không có sự kiện bất thường"
         fund_prompt = (
             f"{header}\n"
             f"P/E: {fund.get('pe')}x, P/B: {fund.get('pb')}x, EPS: {_fmt(fund.get('eps'))} đ, ROE: {fund.get('roe')}%.\n"
             f"Biên lợi nhuận ròng: {fund.get('net_margin')}%, Nợ/Vốn CSH: {fund.get('debt_to_equity')}x, "
             f"Thanh toán hiện hành: {fund.get('current_ratio')}x.\n"
             f"Tăng trưởng doanh thu: {fund.get('revenue_growth')}%, Tăng trưởng EPS: {fund.get('eps_growth')}%.\n"
-            f"Vốn hóa: {_fmt(fund.get('market_cap'))} tỷ VNĐ, Tỷ suất cổ tức: {fund.get('dividend_yield')}%."
+            f"Vốn hóa: {_fmt(fund.get('market_cap'))} tỷ VNĐ, Tỷ suất cổ tức: {fund.get('dividend_yield')}%\n"
+            f"Sự kiện doanh nghiệp & Cổ tức/GDKHQ: {events_str}."
         )
         fund_report = yield from self._agent_events(
             "fundamental", "Chuyên viên Cơ bản (Fundamental Analyst)", FUNDAMENTAL_ANALYST_PROMPT, fund_prompt, context

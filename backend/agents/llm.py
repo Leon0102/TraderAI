@@ -213,8 +213,19 @@ def score_signals(context: Dict[str, Any]) -> Tuple[int, List[str], List[str]]:
     de = f.get("debt_to_equity")
     if de is not None and de > 1.5:
         bear.append(f"Nợ/Vốn CSH {de}x — đòn bẩy cao, nhạy cảm với lãi suất")
-    if pb and pb > 4:
-        bear.append(f"P/B {pb}x — định giá tài sản cao")
+    div_yield = f.get("dividend_yield")
+    if div_yield is not None and div_yield >= 5.0:
+        bull.append(f"Tỷ suất cổ tức tiền mặt {div_yield}% — nguồn lợi tức ổn định, đệm phòng thủ tốt")
+
+    corp_events = context.get("corporate_events", [])
+    for ev in corp_events:
+        ev_title = (ev.get("title") or "").lower()
+        if any(k in ev_title for k in ["phát hành", "tăng vốn"]):
+            bear.append("Kế hoạch phát hành/tăng vốn — rủi ro pha loãng cổ phiếu")
+            break
+        elif any(k in ev_title for k in ["gdkhq", "không hưởng quyền", "chốt quyền"]):
+            bear.append("Sắp tới ngày GDKHQ — rủi ro thị giá bị điều chỉnh kỹ thuật và kẹp vốn cổ tức")
+            break
 
     score_news = s.get("score", 0) or 0
     if score_news > 15:
@@ -274,9 +285,11 @@ def generate_heuristic_response(agent_role: str, context: Dict[str, Any]) -> str
         pe_eval = "rẻ" if pe and 0 < pe < 10 else ("hợp lý" if pe and pe <= 16 else "đắt / cần kiểm chứng")
         roe_eval = "xuất sắc" if roe and roe >= 18 else ("khá" if roe and roe >= 12 else "yếu")
         verdict = "Xuất sắc" if (roe or 0) >= 18 and pe and 0 < pe < 15 else ("Đạt chuẩn" if (roe or 0) >= 10 else "Kém")
+        div = f.get("dividend_yield")
+        div_str = f"{div}%" if div is not None else "N/A"
         return (
             f"• **Định giá**: P/E **{pe}x** ({pe_eval}), P/B **{f.get('pb')}x**, EPS {_fmt(f.get('eps'))}.\n"
-            f"• **Hiệu quả**: ROE **{roe}%** ({roe_eval}), biên LN ròng {f.get('net_margin')}%.\n"
+            f"• **Hiệu quả & Cổ tức**: ROE **{roe}%** ({roe_eval}), biên LN ròng {f.get('net_margin')}%, cổ tức tiền mặt **{div_str}**.\n"
             f"• **Sức khỏe tài chính**: Nợ/Vốn CSH {f.get('debt_to_equity')}x, thanh toán hiện hành {f.get('current_ratio')}x.\n"
             f"• **Tăng trưởng**: Doanh thu {f.get('revenue_growth')}%, EPS {f.get('eps_growth')}%.\n"
             f"• **Đánh giá cơ bản**: **{verdict}**."
@@ -305,11 +318,16 @@ def generate_heuristic_response(agent_role: str, context: Dict[str, Any]) -> str
         return report
 
     if agent_role == "bear":
+        corp_evts = context.get("corporate_events", [])
+        extra_evt_warn = ""
+        if corp_evts:
+            extra_evt_warn = f"\n\n**Lưu ý sự kiện & GDKHQ**: Doanh nghiệp có sự kiện gần đây ({corp_evts[0].get('title', '')}). Cần chú ý ngày chốt quyền để tránh bị điều chỉnh giá thị trường ngoài ý muốn."
         return (
             f"Phe Gấu phản biện — các **RỦI RO** hội đồng cần cân nhắc với {ticker}:\n"
             + _bullets(bear_pts, "1. Không có tín hiệu tiêu cực rõ ràng trong dữ liệu, nhưng rủi ro thị trường chung luôn hiện hữu.")
             + f"\n\n**Rủi ro T+2.5**: hàng mua hôm nay chỉ về tài khoản chiều T+2; với biên độ {exchange} ±{limit}%, "
             f"hai phiên giảm sàn liên tiếp có thể khiến vị thế lỗ tới ~{limit * 2}% trước khi bán được."
+            + extra_evt_warn
         )
 
     if agent_role == "portfolio_manager":

@@ -562,6 +562,13 @@ export interface AgentCouncilVerdict {
   summary: string;
 }
 
+export interface CorporateEvent {
+  type: string;
+  title: string;
+  date: string;
+  source?: string;
+}
+
 export interface AgentCouncilContext {
   ticker: string;
   company_name?: string;
@@ -575,6 +582,8 @@ export interface AgentCouncilContext {
   pe?: number | null;
   pb?: number | null;
   roe?: number | null;
+  dividend_yield?: number | null;
+  corporate_events?: CorporateEvent[];
   foreign_flow?: string;
   market_context?: string;
   news_sentiment?: { score: number; label: string; trend: string; key_events: string[] };

@@ -3,8 +3,20 @@
 
 import { fetchStockBars } from '../api/stockApi';
 import { analyzeShortTerm } from '../analysis/technicalAnalysis';
+import { getCouncilVerdict, openCouncilForTicker } from './agentCouncil';
 
 const STORAGE_KEY = 'traderai_watchlist';
+
+let hasBoundVerdictListener = false;
+
+function initWatchlistListener() {
+  if (!hasBoundVerdictListener && typeof window !== 'undefined') {
+    window.addEventListener('councilVerdictSaved', () => {
+      renderWatchlist();
+    });
+    hasBoundVerdictListener = true;
+  }
+}
 
 function getWatchlist(): string[] {
   try {
@@ -35,7 +47,26 @@ export function isInWatchlist(ticker: string): boolean {
   return getWatchlist().includes(ticker);
 }
 
+function renderCouncilVerdictBadge(ticker: string): string {
+  const verdict = getCouncilVerdict(ticker);
+  if (verdict) {
+    const cls = verdict.action === 'MUA' ? 'badge-buy' : verdict.action === 'BÁN' ? 'badge-sell' : 'badge-hold';
+    const icon = verdict.action === 'MUA' ? '🟢' : verdict.action === 'BÁN' ? '🔴' : '🟡';
+    return `
+      <button class="wl-ai-badge ${cls}" data-open-council="${ticker}" title="Xem phán quyết Hội đồng AI (${verdict.risk_level})">
+        <span class="badge-icon">${icon} AI: ${verdict.action}</span>
+      </button>
+    `;
+  }
+  return `
+    <button class="wl-ai-badge badge-untested" data-open-council="${ticker}" title="Kích hoạt Hội đồng AI thẩm định mã ${ticker}">
+      <span>🤖 Soi AI</span>
+    </button>
+  `;
+}
+
 export async function renderWatchlist() {
+  initWatchlistListener();
   const container = document.getElementById('watchlistCards');
   const section = document.getElementById('watchlistSection');
   if (!container) return;
@@ -52,8 +83,13 @@ export async function renderWatchlist() {
   container.innerHTML = list.map(ticker => `
     <div class="watchlist-card" data-ticker="${ticker}">
       <div class="wl-header">
-        <span class="wl-ticker">${ticker}</span>
-        <button class="wl-remove" data-remove="${ticker}">✕</button>
+        <div class="wl-title-box">
+          <span class="wl-ticker">${ticker}</span>
+        </div>
+        <div class="wl-header-actions">
+          ${renderCouncilVerdictBadge(ticker)}
+          <button class="wl-remove" data-remove="${ticker}" title="Xóa khỏi theo dõi">✕</button>
+        </div>
       </div>
       <div class="wl-loading">
         <div class="spinner tiny"></div>
@@ -98,6 +134,17 @@ export async function renderWatchlist() {
       e.stopPropagation();
       const ticker = (btn as HTMLElement).dataset.remove;
       if (ticker) removeFromWatchlist(ticker);
+    });
+  });
+
+  // AI Council trigger from badge or button
+  container.querySelectorAll('[data-open-council]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const ticker = (btn as HTMLElement).dataset.openCouncil;
+      if (ticker) {
+        openCouncilForTicker(ticker);
+      }
     });
   });
 

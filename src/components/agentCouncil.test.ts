@@ -58,3 +58,46 @@ describe('streamAgentCouncil', () => {
     await expect(streamAgentCouncil({ ticker: '??' }, () => {})).rejects.toThrow('Mã cổ phiếu không hợp lệ');
   });
 });
+
+describe('Council Sectors and Verdict Storage', () => {
+  it('exports valid sector definitions with expected industry tickers', async () => {
+    const { SECTORS } = await import('./agentCouncil');
+    expect(SECTORS.length).toBeGreaterThanOrEqual(7);
+    const bank = SECTORS.find(s => s.id === 'BANK');
+    expect(bank).toBeDefined();
+    expect(bank?.tickers).toContain('VCB');
+    expect(bank?.tickers).toContain('TCB');
+
+    const steel = SECTORS.find(s => s.id === 'STEEL');
+    expect(steel).toBeDefined();
+    expect(steel?.tickers).toContain('HPG');
+  });
+
+  it('persists council verdict to localStorage and retrieves it', async () => {
+    const memoryStore: Record<string, string> = {};
+    const mockStorage = {
+      getItem: (k: string) => memoryStore[k] || null,
+      setItem: (k: string, v: string) => { memoryStore[k] = v; },
+      removeItem: (k: string) => { delete memoryStore[k]; },
+      clear: () => { for (const k in memoryStore) delete memoryStore[k]; },
+    };
+    vi.stubGlobal('localStorage', mockStorage);
+
+    const { saveCouncilVerdict, getCouncilVerdict } = await import('./agentCouncil');
+    const mockVerdict = {
+      action: 'MUA' as const,
+      entry_zone: '21.000 - 21.500 đ',
+      target_price: '24.000 đ',
+      stop_loss: '20.000 đ',
+      sizing: '15%',
+      risk_level: 'Trung bình',
+      summary: 'Dòng tiền vào mạnh, RSI tích lũy tốt.',
+    };
+
+    saveCouncilVerdict('HPG', mockVerdict);
+    const retrieved = getCouncilVerdict('HPG');
+    expect(retrieved).not.toBeNull();
+    expect(retrieved?.action).toBe('MUA');
+    expect(retrieved?.target_price).toBe('24.000 đ');
+  });
+});

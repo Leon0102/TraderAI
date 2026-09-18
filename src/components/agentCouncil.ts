@@ -9,16 +9,93 @@ import type {
   AgentCouncilResult,
   AgentCouncilVerdict,
   AgentRole,
+  CorporateEvent,
 } from '../api/stockApi';
 
-// Shown until today's live top stocks load (see loadTodayQuickTickers)
-const QUICK_TICKERS = ['HPG', 'FPT', 'VNM', 'SSI', 'MWG', 'TCB'];
+export interface SectorInfo {
+  id: string;
+  label: string;
+  tickers: string[];
+}
+
+export const SECTORS: SectorInfo[] = [
+  { id: 'ALL', label: '🔥 Top Ngày', tickers: ['HPG', 'FPT', 'VNM', 'SSI', 'MWG', 'TCB'] },
+  { id: 'BANK', label: '🏦 Ngân Hàng', tickers: ['VCB', 'TCB', 'MBB', 'ACB', 'CTG', 'VPB', 'STB'] },
+  { id: 'STEEL', label: '🏗️ Thép', tickers: ['HPG', 'NKG', 'HSG', 'VGS'] },
+  { id: 'REALESTATE', label: '🏢 BĐS', tickers: ['VHM', 'VIC', 'KDH', 'NLG', 'PDR', 'DXG'] },
+  { id: 'SECURITIES', label: '📈 Chứng Khoán', tickers: ['SSI', 'VND', 'VCI', 'HCM', 'SHS'] },
+  { id: 'RETAIL', label: '🛒 Bán Lẻ', tickers: ['MWG', 'MSN', 'VNM', 'PNJ', 'FRT'] },
+  { id: 'ENERGY', label: '⚡ Năng Lượng', tickers: ['GAS', 'PVD', 'PVS', 'BSR', 'POW'] },
+  { id: 'TECH', label: '💻 Công Nghệ', tickers: ['FPT', 'CMG', 'ELC'] },
+];
+
+let currentSectorId = 'ALL';
+let todayTopTickers = ['HPG', 'FPT', 'VNM', 'SSI', 'MWG', 'TCB'];
 
 let currentCouncilTicker = 'HPG';
 let isAnalyzing = false;
 let activeController: AbortController | null = null;
 let currentAgentFilter: 'all' | 'verdict' | 'debate' | 'technical' | 'fundamental' | 'sentiment' = 'all';
 let latestContext: AgentCouncilContext | null = null;
+
+const VERDICTS_STORAGE_KEY = 'traderai_council_verdicts';
+
+export interface StoredCouncilVerdict {
+  action: 'MUA' | 'BÁN' | 'QUAN SÁT';
+  entry_zone: string;
+  target_price: string;
+  stop_loss: string;
+  sizing: string;
+  risk_level: string;
+  timestamp: number;
+}
+
+function getStorage(): Storage | null {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) return window.localStorage;
+    if (typeof localStorage !== 'undefined') return localStorage;
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+export function saveCouncilVerdict(ticker: string, verdict: AgentCouncilVerdict) {
+  try {
+    const storage = getStorage();
+    if (!storage) return;
+    const raw = storage.getItem(VERDICTS_STORAGE_KEY);
+    const map: Record<string, StoredCouncilVerdict> = raw ? JSON.parse(raw) : {};
+    map[ticker.toUpperCase()] = {
+      action: verdict.action,
+      entry_zone: verdict.entry_zone,
+      target_price: verdict.target_price,
+      stop_loss: verdict.stop_loss,
+      sizing: verdict.sizing,
+      risk_level: verdict.risk_level,
+      timestamp: Date.now(),
+    };
+    storage.setItem(VERDICTS_STORAGE_KEY, JSON.stringify(map));
+    if (typeof window !== 'undefined' && window.dispatchEvent) {
+      window.dispatchEvent(new CustomEvent('councilVerdictSaved', { detail: { ticker: ticker.toUpperCase(), verdict } }));
+    }
+  } catch (e) {
+    console.error('Failed to save council verdict:', e);
+  }
+}
+
+export function getCouncilVerdict(ticker: string): StoredCouncilVerdict | null {
+  try {
+    const storage = getStorage();
+    if (!storage) return null;
+    const raw = storage.getItem(VERDICTS_STORAGE_KEY);
+    if (!raw) return null;
+    const map = JSON.parse(raw);
+    return map[ticker.toUpperCase()] || null;
+  } catch {
+    return null;
+  }
+}
 
 const AGENT_META: Record<AgentRole, { avatar: string; title: string; subtitle: string; step: string }> = {
   technical: { avatar: '📈', title: 'Chuyên gia Phân tích Kỹ thuật', subtitle: 'MA20/50/200, RSI, MACD, Bollinger, Khối lượng', step: 'step-tech' },
@@ -48,22 +125,49 @@ async function loadTodayQuickTickers() {
     const top = await fetchTopStocks(8);
     if (dataSourceStatus.stocks !== 'real') return;
     const tickers = [...new Set(top.map((s: any) => s.ticker).filter(Boolean))].slice(0, 8) as string[];
-    const wrap = document.getElementById('quickCouncilTickers');
-    if (!wrap || tickers.length === 0) return;
+    if (tickers.length === 0) return;
 
-    if (!isAnalyzing && !tickers.includes(currentCouncilTicker)) {
+    todayTopTickers = tickers;
+    if (!isAnalyzing && !tickers.includes(currentCouncilTicker) && currentSectorId === 'ALL') {
       currentCouncilTicker = tickers[0];
       const input = document.getElementById('councilTickerInput') as HTMLInputElement | null;
       if (input) input.value = currentCouncilTicker;
     }
-    wrap.innerHTML = `<span class="quick-label">🔥 Top hôm nay:</span>` + tickers
-      .map(t => `<button class="chip" data-ticker="${escapeHtml(t)}">${escapeHtml(t)}</button>`)
-      .join('');
-    bindQuickChips();
-    syncQuickChips();
+
+    if (currentSectorId === 'ALL') {
+      updateQuickTickersDisplay();
+    }
   } catch {
     /* keep placeholder chips */
   }
+}
+
+function updateQuickTickersDisplay() {
+  const wrap = document.getElementById('quickCouncilTickers');
+  if (!wrap) return;
+
+  const currentSector = SECTORS.find(s => s.id === currentSectorId) || SECTORS[0];
+  const tickers = currentSectorId === 'ALL' ? todayTopTickers : currentSector.tickers;
+  const label = currentSectorId === 'ALL' ? '🔥 Top hôm nay:' : `${currentSector.label}:`;
+
+  wrap.innerHTML = `<span class="quick-label">${label}</span>` + tickers
+    .map(t => `<button class="chip${t === currentCouncilTicker ? ' active' : ''}" data-ticker="${escapeHtml(t)}">${escapeHtml(t)}</button>`)
+    .join('');
+
+  bindQuickChips();
+  syncQuickChips();
+}
+
+function bindSectorChips() {
+  document.querySelectorAll<HTMLButtonElement>('#councilSectorRow .sector-chip').forEach(btn => {
+    btn.addEventListener('click', () => {
+      currentSectorId = btn.dataset.sector || 'ALL';
+      document.querySelectorAll('#councilSectorRow .sector-chip').forEach(b => {
+        b.classList.toggle('active', (b as HTMLElement).dataset.sector === currentSectorId);
+      });
+      updateQuickTickersDisplay();
+    });
+  });
 }
 
 function bindQuickChips() {
@@ -82,7 +186,16 @@ export function openCouncilForTicker(ticker: string) {
   currentCouncilTicker = ticker.toUpperCase().trim();
   const input = document.getElementById('councilTickerInput') as HTMLInputElement | null;
   if (input) input.value = currentCouncilTicker;
-  syncQuickChips();
+
+  // If ticker belongs to a known sector, switch to that sector
+  const matched = SECTORS.find(s => s.id !== 'ALL' && s.tickers.includes(currentCouncilTicker));
+  if (matched) {
+    currentSectorId = matched.id;
+    document.querySelectorAll('#councilSectorRow .sector-chip').forEach(b => {
+      b.classList.toggle('active', (b as HTMLElement).dataset.sector === currentSectorId);
+    });
+  }
+  updateQuickTickersDisplay();
 
   document.getElementById('agentCouncilSection')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   startCouncilAnalysis();
@@ -110,6 +223,14 @@ function renderCouncilSkeleton(container: HTMLElement) {
 
       <!-- Main Controls Bar -->
       <div class="council-controls-bar">
+        <!-- Sector Selector Row -->
+        <div class="council-sector-row" id="councilSectorRow">
+          <span class="sector-row-label">🏷️ Nhóm ngành:</span>
+          <div class="sector-chips">
+            ${SECTORS.map(s => `<button class="sector-chip${s.id === currentSectorId ? ' active' : ''}" data-sector="${s.id}">${escapeHtml(s.label)}</button>`).join('')}
+          </div>
+        </div>
+
         <div class="council-inputs">
           <div class="council-ticker-box">
             <label for="councilTickerInput">Mã Cổ Phiếu:</label>
@@ -119,7 +240,8 @@ function renderCouncilSkeleton(container: HTMLElement) {
           </div>
 
           <div class="quick-tickers" id="quickCouncilTickers">
-            ${QUICK_TICKERS.map(t => `<button class="chip${t === currentCouncilTicker ? ' active' : ''}" data-ticker="${t}">${t}</button>`).join('')}
+            <span class="quick-label">🔥 Top hôm nay:</span>
+            ${todayTopTickers.map(t => `<button class="chip${t === currentCouncilTicker ? ' active' : ''}" data-ticker="${t}">${t}</button>`).join('')}
           </div>
         </div>
 
@@ -186,6 +308,9 @@ function bindCouncilEvents() {
   input?.addEventListener('keydown', e => {
     if (e.key === 'Enter') runFromInput();
   });
+
+  // Sector chips
+  bindSectorChips();
 
   // Agent Perspective Pills
   document.querySelectorAll<HTMLButtonElement>('#agentPills .agent-pill').forEach(pill => {
@@ -368,6 +493,7 @@ function handleStreamEvent(event: AgentCouncilEvent, ticker: string) {
       markStep('portfolio_manager', 'completed');
       if (statusMsg) statusMsg.textContent = `✅ Hội đồng đã hoàn tất phiên tranh luận cho ${ticker}!`;
       feed.appendChild(buildVerdictCard(event.structured, event.content, event.engine));
+      saveCouncilVerdict(ticker, event.structured);
       applyAgentFilter(currentAgentFilter);
       break;
     case 'error':
@@ -426,11 +552,37 @@ function renderModeBadge(mode: 'llm' | 'heuristic', model: string | null | undef
   }
 }
 
+function renderCorporateEventsBanner(events?: CorporateEvent[]): string {
+  if (!events || events.length === 0) return '';
+  return `
+    <div class="corporate-events-banner">
+      <div class="events-banner-header">
+        <span class="banner-icon">📢</span>
+        <span class="banner-title">Sự Kiện & Lịch Cổ Tức / GDKHQ:</span>
+      </div>
+      <div class="events-pill-row">
+        ${events.slice(0, 3).map(ev => `
+          <div class="event-chip">
+            <span class="event-date">${escapeHtml(ev.date || 'Gần đây')}</span>
+            <span class="event-tag">${escapeHtml(ev.type || 'SỰ KIỆN')}</span>
+            <span class="event-title" title="${escapeHtml(ev.title)}">${escapeHtml(ev.title)}</span>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
 function renderContextStrip(ctx: AgentCouncilContext | null | undefined) {
   const el = document.getElementById('councilContext');
   if (!el || !ctx) return;
   el.hidden = false;
-  el.innerHTML = buildContextItems(ctx);
+  el.innerHTML = `
+    <div class="context-items-grid">
+      ${buildContextItems(ctx)}
+    </div>
+    ${renderCorporateEventsBanner(ctx.corporate_events)}
+  `;
 }
 
 function buildContextItems(ctx: AgentCouncilContext): string {
@@ -444,6 +596,7 @@ function buildContextItems(ctx: AgentCouncilContext): string {
     ['Trần / Sàn', `${num(ctx.ceiling)} / ${num(ctx.floor)}`],
     ['RSI', num(ctx.rsi)],
     ['P/E · ROE', `${num(ctx.pe, 'x')} · ${num(ctx.roe, '%')}`],
+    ['Cổ tức', ctx.dividend_yield != null ? `${ctx.dividend_yield}%` : 'N/A'],
     ['Khối ngoại', ctx.foreign_flow ?? 'N/A'],
   ];
   return items
@@ -661,6 +814,7 @@ function renderFullCouncilResult(res: AgentCouncilResult) {
   res.warnings?.forEach(w => feed.appendChild(buildNotice(w, 'warning')));
   if (res.verdict?.structured) {
     feed.appendChild(buildVerdictCard(res.verdict.structured, res.verdict.raw, res.engines?.portfolio_manager));
+    saveCouncilVerdict(res.ticker, res.verdict.structured);
     markStep('portfolio_manager', 'completed');
   }
   const statusMsg = document.getElementById('statusMsg');
