@@ -17,8 +17,11 @@ const LOGOUT_API = '/api/auth/logout';
 const encoder = new TextEncoder();
 
 function getEnv() {
-  const password = process.env.APP_PASSWORD ?? '';
-  const secret = process.env.AUTH_SECRET ?? '';
+  // `process` is injected by Vercel at runtime but is not part of the browser
+  // TypeScript configuration used by this project.
+  const env = (globalThis as typeof globalThis & { process?: { env?: Record<string, string | undefined> } }).process?.env;
+  const password = env?.APP_PASSWORD ?? '';
+  const secret = env?.AUTH_SECRET ?? '';
   return { password, secret, configured: password.length > 0 && secret.length >= 32 };
 }
 
