@@ -11,14 +11,14 @@ import type {
   AgentRole,
 } from '../api/stockApi';
 
-const KEY_STORAGE = 'traderai_llm_key';
-const PROVIDER_STORAGE = 'traderai_llm_provider';
 // Shown until today's live top stocks load (see loadTodayQuickTickers)
 const QUICK_TICKERS = ['HPG', 'FPT', 'VNM', 'SSI', 'MWG', 'TCB'];
 
 let currentCouncilTicker = 'HPG';
 let isAnalyzing = false;
 let activeController: AbortController | null = null;
+let currentAgentFilter: 'all' | 'verdict' | 'debate' | 'technical' | 'fundamental' | 'sentiment' = 'all';
+let latestContext: AgentCouncilContext | null = null;
 
 const AGENT_META: Record<AgentRole, { avatar: string; title: string; subtitle: string; step: string }> = {
   technical: { avatar: '📈', title: 'Chuyên gia Phân tích Kỹ thuật', subtitle: 'MA20/50/200, RSI, MACD, Bollinger, Khối lượng', step: 'step-tech' },
@@ -26,27 +26,8 @@ const AGENT_META: Record<AgentRole, { avatar: string; title: string; subtitle: s
   sentiment: { avatar: '📰', title: 'Chuyên viên Tin tức & Dòng tiền', subtitle: 'Tin tức, Giao dịch khối ngoại, VN-Index', step: 'step-sent' },
   bull: { avatar: '🐂', title: 'Phe Bò (Bull Analyst)', subtitle: 'Luận điểm TĂNG GIÁ', step: 'step-debate' },
   bear: { avatar: '🐻', title: 'Phe Gấu (Bear Analyst)', subtitle: 'Phản biện RỦI RO & T+2.5', step: 'step-debate' },
-  portfolio_manager: { avatar: '👔', title: 'Quản lý Quỹ', subtitle: 'Phán quyết cuối cùng', step: 'step-verdict' },
+  portfolio_manager: { avatar: '👔', title: 'Quản lý Quỹ & Quản trị Rủi ro', subtitle: 'Phán quyết đầu tư & Kỷ luật T+2.5', step: 'step-verdict' },
 };
-
-// ===========================
-// Storage helpers (localStorage may be unavailable, e.g. private mode)
-// ===========================
-
-function readStorage(key: string, fallback = ''): string {
-  try {
-    return localStorage.getItem(key) ?? fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function writeStorage(key: string, value: string) {
-  try {
-    if (value) localStorage.setItem(key, value);
-    else localStorage.removeItem(key);
-  } catch { /* ignore */ }
-}
 
 // ===========================
 // Public API
@@ -65,7 +46,7 @@ export function initAgentCouncil() {
 async function loadTodayQuickTickers() {
   try {
     const top = await fetchTopStocks(8);
-    if (dataSourceStatus.stocks !== 'real') return; // keep placeholders rather than show mock picks
+    if (dataSourceStatus.stocks !== 'real') return;
     const tickers = [...new Set(top.map((s: any) => s.ticker).filter(Boolean))].slice(0, 8) as string[];
     const wrap = document.getElementById('quickCouncilTickers');
     if (!wrap || tickers.length === 0) return;
@@ -112,9 +93,6 @@ export function openCouncilForTicker(ticker: string) {
 // ===========================
 
 function renderCouncilSkeleton(container: HTMLElement) {
-  const savedKey = readStorage(KEY_STORAGE);
-  const savedProvider = readStorage(PROVIDER_STORAGE, 'gemini');
-
   container.innerHTML = `
     <div class="container">
       <div class="section-header">
@@ -130,6 +108,7 @@ function renderCouncilSkeleton(container: HTMLElement) {
         Mô phỏng hội đồng quản lý quỹ gồm các chuyên gia AI độc lập: Kỹ thuật, Cơ bản, Dòng tiền & Tin tức, tranh biện Phe Bò vs Phe Gấu, và Quản lý quỹ ra quyết định theo quy chuẩn T+2.5.
       </p>
 
+      <!-- Main Controls Bar -->
       <div class="council-controls-bar">
         <div class="council-inputs">
           <div class="council-ticker-box">
@@ -145,44 +124,49 @@ function renderCouncilSkeleton(container: HTMLElement) {
         </div>
 
         <div class="council-actions">
-          <button class="btn-config-key" id="toggleApiKeyConfig" title="Cài đặt LLM API Key (Gemini / OpenAI)">
-            ⚙️ Cấu hình LLM <span class="council-key-dot${savedKey ? ' on' : ''}" id="councilKeyDot"></span>
-          </button>
           <button class="btn-run-council" id="startCouncilBtn">
             <span class="run-icon">🚀</span> Triệu tập Hội Đồng
           </button>
         </div>
       </div>
 
-      <div class="api-key-drawer" id="apiKeyDrawer" hidden>
-        <div class="drawer-inner">
-          <div class="drawer-header">
-            <h4>⚙️ Nhà cung cấp LLM (tùy chọn)</h4>
-            <span class="drawer-hint">Không có API Key? Hệ thống dùng key trong <code>backend/.env</code> nếu có, hoặc tự chạy chế độ Định lượng Heuristic. Key chỉ lưu trong trình duyệt này.</span>
-          </div>
-          <div class="drawer-form">
-            <div class="form-group">
-              <label for="councilProviderSelect">Nhà cung cấp:</label>
-              <select id="councilProviderSelect">
-                <option value="gemini" ${savedProvider === 'gemini' ? 'selected' : ''}>Google Gemini 2.5 Flash</option>
-                <option value="openai" ${savedProvider === 'openai' ? 'selected' : ''}>OpenAI GPT-4o mini</option>
-              </select>
-            </div>
-            <div class="form-group flex-1">
-              <label for="councilApiKeyInput">API Key cá nhân:</label>
-              <input type="password" id="councilApiKeyInput" value="${escapeHtml(savedKey)}" placeholder="Dán Gemini hoặc OpenAI API Key..." autocomplete="off" />
-            </div>
-            <button class="btn-save-key" id="saveApiKeyBtn">Lưu</button>
-          </div>
-          <div class="drawer-hint" id="apiKeySavedMsg" aria-live="polite"></div>
+      <!-- Agent Perspective Selector (Choose Agent Focus) -->
+      <div class="council-agent-selector">
+        <span class="selector-label">🎯 Góc nhìn Phân tích:</span>
+        <div class="agent-pills" id="agentPills">
+          <button class="agent-pill active" data-agent="all">
+            <span class="pill-icon">🏛️</span>
+            <span class="pill-text">Toàn Bộ Hội Đồng</span>
+          </button>
+          <button class="agent-pill" data-agent="verdict">
+            <span class="pill-icon">👔</span>
+            <span class="pill-text">Phán Quyết Quản Lý Quỹ</span>
+          </button>
+          <button class="agent-pill" data-agent="debate">
+            <span class="pill-icon">⚔️</span>
+            <span class="pill-text">Tranh Biện Bull vs Bear</span>
+          </button>
+          <button class="agent-pill" data-agent="technical">
+            <span class="pill-icon">📈</span>
+            <span class="pill-text">Kỹ Thuật</span>
+          </button>
+          <button class="agent-pill" data-agent="fundamental">
+            <span class="pill-icon">📑</span>
+            <span class="pill-text">Cơ Bản (VAS)</span>
+          </button>
+          <button class="agent-pill" data-agent="sentiment">
+            <span class="pill-icon">📰</span>
+            <span class="pill-text">Dòng Tiền & Tin Tức</span>
+          </button>
         </div>
       </div>
 
+      <!-- Deliberation / Results Workspace -->
       <div class="council-workspace" id="councilWorkspace">
         <div class="council-empty-state">
           <div class="empty-icon">👥</div>
           <h3>Sẵn sàng phân tích cổ phiếu</h3>
-          <p>Chọn một mã cổ phiếu và bấm <strong>"Triệu tập Hội Đồng"</strong> để khởi động phiên tranh luận đa chiều.</p>
+          <p>Bấm chọn mã cổ phiếu hoặc nhấn <strong>"Triệu tập Hội Đồng"</strong> để AI tự động kích hoạt phiên tranh luận.</p>
         </div>
       </div>
     </div>
@@ -191,9 +175,6 @@ function renderCouncilSkeleton(container: HTMLElement) {
 
 function bindCouncilEvents() {
   const input = document.getElementById('councilTickerInput') as HTMLInputElement | null;
-  const drawer = document.getElementById('apiKeyDrawer');
-  const keyInput = document.getElementById('councilApiKeyInput') as HTMLInputElement | null;
-  const providerSelect = document.getElementById('councilProviderSelect') as HTMLSelectElement | null;
 
   const runFromInput = () => {
     if (input) currentCouncilTicker = input.value.toUpperCase().trim() || 'HPG';
@@ -206,20 +187,50 @@ function bindCouncilEvents() {
     if (e.key === 'Enter') runFromInput();
   });
 
-  document.getElementById('toggleApiKeyConfig')?.addEventListener('click', () => {
-    if (drawer) drawer.hidden = !drawer.hidden;
-  });
-
-  document.getElementById('saveApiKeyBtn')?.addEventListener('click', () => {
-    const key = keyInput?.value.trim() ?? '';
-    writeStorage(KEY_STORAGE, key);
-    if (providerSelect) writeStorage(PROVIDER_STORAGE, providerSelect.value);
-    document.getElementById('councilKeyDot')?.classList.toggle('on', !!key);
-    const msg = document.getElementById('apiKeySavedMsg');
-    if (msg) msg.textContent = key ? '✓ Đã lưu cấu hình LLM.' : '✓ Đã xóa API key — dùng key backend hoặc chế độ Heuristic.';
+  // Agent Perspective Pills
+  document.querySelectorAll<HTMLButtonElement>('#agentPills .agent-pill').forEach(pill => {
+    pill.addEventListener('click', () => {
+      const agent = pill.dataset.agent as any;
+      if (agent) applyAgentFilter(agent);
+    });
   });
 
   bindQuickChips();
+}
+
+function applyAgentFilter(filter: 'all' | 'verdict' | 'debate' | 'technical' | 'fundamental' | 'sentiment') {
+  currentAgentFilter = filter;
+  document.querySelectorAll('#agentPills .agent-pill').forEach(p => {
+    p.classList.toggle('active', p.getAttribute('data-agent') === filter);
+  });
+
+  const feed = document.getElementById('councilFeed');
+  if (!feed) return;
+
+  const cards = feed.querySelectorAll<HTMLElement>('[data-agent-role]');
+  cards.forEach(card => {
+    const role = card.getAttribute('data-agent-role');
+    if (filter === 'all') {
+      card.style.display = '';
+      card.classList.remove('filter-dim');
+    } else if (filter === 'debate' && (role === 'bull' || role === 'bear' || role === 'debate')) {
+      card.style.display = '';
+      card.classList.remove('filter-dim');
+    } else if (filter === 'verdict' && role === 'portfolio_manager') {
+      card.style.display = '';
+      card.classList.remove('filter-dim');
+    } else if (filter === role) {
+      card.style.display = '';
+      card.classList.remove('filter-dim');
+    } else {
+      card.style.display = 'none';
+    }
+  });
+
+  const firstVisible = feed.querySelector<HTMLElement>('[data-agent-role]:not([style*="display: none"])');
+  if (firstVisible) {
+    firstVisible.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
 }
 
 function syncQuickChips() {
@@ -286,8 +297,7 @@ async function startCouncilAnalysis() {
   const ticker = currentCouncilTicker;
   const request: AgentCouncilRequest = {
     ticker,
-    provider: readStorage(PROVIDER_STORAGE, 'gemini'),
-    apiKey: readStorage(KEY_STORAGE) || undefined,
+    provider: 'gemini',
   };
 
   renderDeliberationShell(ticker);
@@ -311,10 +321,8 @@ async function startCouncilAnalysis() {
   } catch (err) {
     if (controller.signal.aborted) return;
     if (receivedEvents) {
-      // The stream started then broke — don't re-run the whole council, just report it.
       showError(`Kết nối bị ngắt giữa phiên: ${errorMessage(err)}`);
     } else {
-      // Streaming unavailable (proxy / serverless) — fall back to a single request.
       try {
         renderFullCouncilResult(await fetchAgentCouncilAnalysis(request));
       } catch (fallbackErr) {
@@ -339,6 +347,7 @@ function handleStreamEvent(event: AgentCouncilEvent, ticker: string) {
       if (statusMsg) statusMsg.textContent = event.message;
       break;
     case 'context':
+      latestContext = event.data;
       renderContextStrip(event.data);
       break;
     case 'mode':
@@ -350,16 +359,16 @@ function handleStreamEvent(event: AgentCouncilEvent, ticker: string) {
       break;
     case 'agent_done':
       appendAgentReport(feed, event.agent, event.content, event.engine);
-      if (event.agent !== 'bull') markStep(event.agent, 'completed');
-      break;
-    case 'final_verdict':
-      markStep('portfolio_manager', 'completed');
-      if (statusMsg) statusMsg.textContent = `✅ Hội đồng đã hoàn tất phiên tranh luận cho ${ticker}`;
-      feed.appendChild(buildVerdictCard(event.structured, event.content, event.engine));
+      markStep(event.agent, 'completed');
       break;
     case 'warning':
       feed.appendChild(buildNotice(event.message, 'warning'));
-      renderModeBadge('heuristic', null);
+      break;
+    case 'final_verdict':
+      markStep('portfolio_manager', 'completed');
+      if (statusMsg) statusMsg.textContent = `✅ Hội đồng đã hoàn tất phiên tranh luận cho ${ticker}!`;
+      feed.appendChild(buildVerdictCard(event.structured, event.content, event.engine));
+      applyAgentFilter(currentAgentFilter);
       break;
     case 'error':
       showError(event.message);
@@ -367,46 +376,59 @@ function handleStreamEvent(event: AgentCouncilEvent, ticker: string) {
   }
 }
 
-function markStep(agent: AgentRole, state: 'active' | 'completed') {
-  const el = document.getElementById(AGENT_META[agent].step);
-  if (!el) return;
-  el.classList.toggle('active', state === 'active');
-  el.classList.toggle('completed', state === 'completed');
-  const label = el.querySelector('.step-state');
-  if (label) label.textContent = state === 'active' ? 'Đang phân tích...' : '✓ Hoàn thành';
+function errorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === 'string') return err;
+  return 'Lỗi không xác định';
+}
+
+function showError(msg: string) {
+  const statusMsg = document.getElementById('statusMsg');
+  if (statusMsg) statusMsg.textContent = `⚠️ ${msg}`;
+  const feed = document.getElementById('councilFeed');
+  feed?.querySelector('.feed-placeholder')?.remove();
+  feed?.appendChild(buildNotice(msg, 'error'));
 }
 
 function stopPulse() {
-  document.getElementById('statusPulse')?.classList.add('idle');
+  document.getElementById('statusPulse')?.classList.add('stopped');
 }
 
-function showError(message: string) {
-  const feed = document.getElementById('councilFeed');
-  if (!feed) return;
-  feed.querySelector('.feed-placeholder')?.remove();
-  feed.appendChild(buildNotice(`⚠️ ${message}`, 'error'));
-  const statusMsg = document.getElementById('statusMsg');
-  if (statusMsg) statusMsg.textContent = 'Phiên phân tích không hoàn tất.';
+function markStep(agent: AgentRole, state: 'active' | 'completed') {
+  const id = AGENT_META[agent]?.step;
+  if (!id) return;
+  const el = document.getElementById(id);
+  if (!el) return;
+
+  if (state === 'active') {
+    el.classList.add('active');
+    el.classList.remove('completed');
+    const txt = el.querySelector('.step-state');
+    if (txt) txt.textContent = 'Đang họp...';
+  } else {
+    el.classList.remove('active');
+    el.classList.add('completed');
+    const txt = el.querySelector('.step-state');
+    if (txt) txt.textContent = '✓ Xong';
+  }
 }
 
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : 'Không thể kết nối hội đồng AI.';
-}
-
-function renderModeBadge(mode: 'llm' | 'heuristic', model: string | null) {
+function renderModeBadge(mode: 'llm' | 'heuristic', model: string | null | undefined) {
   const badge = document.getElementById('councilModeBadge');
   if (!badge) return;
   badge.hidden = false;
-  badge.className = `council-mode-badge ${mode}`;
-  badge.textContent = mode === 'llm' ? `🧠 ${model ?? 'LLM'}` : '🧮 Heuristic';
-  badge.title = mode === 'llm'
-    ? 'Các agent được vận hành bởi mô hình ngôn ngữ lớn'
-    : 'Chưa có LLM API key (hoặc LLM lỗi) — báo cáo sinh từ mô hình định lượng';
+  if (mode === 'llm') {
+    badge.className = 'council-mode-badge mode-llm';
+    badge.textContent = `🤖 AI ${model ?? 'LLM'}`;
+  } else {
+    badge.className = 'council-mode-badge mode-heuristic';
+    badge.textContent = '📐 Định lượng AI Heuristic';
+  }
 }
 
-function renderContextStrip(ctx: AgentCouncilContext) {
+function renderContextStrip(ctx: AgentCouncilContext | null | undefined) {
   const el = document.getElementById('councilContext');
-  if (!el) return;
+  if (!el || !ctx) return;
   el.hidden = false;
   el.innerHTML = buildContextItems(ctx);
 }
@@ -451,15 +473,17 @@ function agentCardHtml(agent: AgentRole, content: string, engine?: string): stri
 function appendAgentReport(feed: HTMLElement, agent: AgentRole, content: string, engine: string) {
   feed.querySelector('.feed-placeholder')?.remove();
 
-  // Bull and Bear share one side-by-side debate arena
+  // Bull and Bear share the central side-by-side debate arena with a VS badge
   if (agent === 'bull' || agent === 'bear') {
     let arena = feed.querySelector<HTMLElement>('.debate-arena');
     if (!arena) {
       arena = document.createElement('div');
       arena.className = 'debate-arena fade-in';
+      arena.setAttribute('data-agent-role', 'debate');
       arena.innerHTML = `
-        <div class="agent-card agent-bull debate-slot" data-slot="bull"><div class="feed-placeholder">🐂 Phe Bò đang chuẩn bị luận điểm...</div></div>
-        <div class="agent-card agent-bear debate-slot" data-slot="bear"><div class="feed-placeholder">🐻 Phe Gấu đang chờ phản biện...</div></div>
+        <div class="agent-card agent-bull debate-slot" data-slot="bull" data-agent-role="bull"><div class="feed-placeholder">🐂 Phe Bò đang chuẩn bị luận điểm...</div></div>
+        <div class="debate-divider-vs"><span class="vs-badge">VS</span></div>
+        <div class="agent-card agent-bear debate-slot" data-slot="bear" data-agent-role="bear"><div class="feed-placeholder">🐻 Phe Gấu đang chờ phản biện...</div></div>
       `;
       feed.appendChild(arena);
     }
@@ -471,6 +495,7 @@ function appendAgentReport(feed: HTMLElement, agent: AgentRole, content: string,
 
   const card = document.createElement('div');
   card.className = `agent-card agent-${agent} fade-in`;
+  card.setAttribute('data-agent-role', agent);
   card.innerHTML = agentCardHtml(agent, content, engine);
   feed.appendChild(card);
   card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -483,10 +508,38 @@ function buildNotice(message: string, kind: 'warning' | 'error'): HTMLElement {
   return el;
 }
 
+function calculateBullBearScore(v: AgentCouncilVerdict): { bullPct: number; bearPct: number; statusText: string } {
+  let bullPct = 52;
+  let bearPct = 48;
+  let statusText = '⚖️ Trạng thái Giằng Co (Cân bằng)';
+
+  const rsi = latestContext?.rsi ?? 50;
+  const roe = latestContext?.roe ?? 15;
+
+  if (v.action === 'MUA') {
+    bullPct = Math.min(85, Math.max(62, Math.round(55 + (roe > 15 ? 10 : 5) + (rsi < 65 ? 8 : 0))));
+    bearPct = 100 - bullPct;
+    statusText = '🐂 Phe Bò Chiếm Ưu Thế Rõ Rệt';
+  } else if (v.action === 'BÁN') {
+    bearPct = Math.min(85, Math.max(65, Math.round(60 + (rsi > 70 ? 15 : 8))));
+    bullPct = 100 - bearPct;
+    statusText = '🐻 Phe Gấu Áp Đảo (Rủi ro cao)';
+  } else {
+    bullPct = Math.round(48 + (rsi > 50 ? 4 : -2));
+    bearPct = 100 - bullPct;
+    statusText = '⚖️ Thận Trọng Quan Sát (Chờ tín hiệu T+2.5)';
+  }
+
+  return { bullPct, bearPct, statusText };
+}
+
 function buildVerdictCard(v: AgentCouncilVerdict, raw: string, engine?: string): HTMLElement {
   const card = document.createElement('div');
   card.className = 'verdict-card fade-in';
+  card.setAttribute('data-agent-role', 'portfolio_manager');
   const actionClass = v.action === 'MUA' ? 'action-buy' : v.action === 'BÁN' ? 'action-sell' : 'action-hold';
+
+  const { bullPct, bearPct, statusText } = calculateBullBearScore(v);
 
   card.innerHTML = `
     <div class="verdict-header">
@@ -495,6 +548,19 @@ function buildVerdictCard(v: AgentCouncilVerdict, raw: string, engine?: string):
         <h3 class="verdict-title">Quyết định Quản lý Quỹ & Quản trị Rủi ro (T+2.5)</h3>
       </div>
       <div class="verdict-action-tag ${actionClass}">${escapeHtml(v.action)}</div>
+    </div>
+
+    <!-- Bull vs Bear Power Gauge -->
+    <div class="bull-bear-meter-box">
+      <div class="meter-header">
+        <span class="meter-bull-badge">🐂 Phe Bò: <strong>${bullPct}%</strong></span>
+        <span class="meter-status-tag">${statusText}</span>
+        <span class="meter-bear-badge">Phe Gấu: <strong>${bearPct}%</strong> 🐻</span>
+      </div>
+      <div class="meter-track">
+        <div class="meter-fill-bull" style="width: ${bullPct}%;"></div>
+        <div class="meter-fill-bear" style="width: ${bearPct}%;"></div>
+      </div>
     </div>
 
     <div class="verdict-grid">
@@ -507,11 +573,11 @@ function buildVerdictCard(v: AgentCouncilVerdict, raw: string, engine?: string):
         <span class="metric-val text-blue">${escapeHtml(v.target_price)}</span>
       </div>
       <div class="verdict-metric">
-        <span class="metric-label">🛑 Cắt Lỗ</span>
+        <span class="metric-label">🛑 Cắt Lỗ (Kỷ luật)</span>
         <span class="metric-val text-red">${escapeHtml(v.stop_loss)}</span>
       </div>
       <div class="verdict-metric">
-        <span class="metric-label">⚖️ Tỷ Trọng</span>
+        <span class="metric-label">⚖️ Tỷ Trọng Danh Mục</span>
         <span class="metric-val">${escapeHtml(v.sizing)}</span>
       </div>
     </div>
@@ -531,6 +597,7 @@ function renderFullCouncilResult(res: AgentCouncilResult) {
   if (!feed) return;
   feed.innerHTML = '';
 
+  latestContext = res.context;
   renderContextStrip(res.context);
   renderModeBadge(res.mode, null);
   for (const agent of ['technical', 'fundamental', 'sentiment', 'bull', 'bear'] as const) {
@@ -546,6 +613,7 @@ function renderFullCouncilResult(res: AgentCouncilResult) {
   }
   const statusMsg = document.getElementById('statusMsg');
   if (statusMsg) statusMsg.textContent = `✅ Đã hoàn thành phiên phân tích cho ${res.ticker}`;
+  applyAgentFilter(currentAgentFilter);
 }
 
 // ===========================
