@@ -46,8 +46,8 @@ export function initChart() {
     },
     crosshair: {
       mode: 0,
-      vertLine: { color: 'rgba(99, 102, 241, 0.3)', width: 1, style: 2 },
-      horzLine: { color: 'rgba(99, 102, 241, 0.3)', width: 1, style: 2 },
+      vertLine: { color: 'rgba(195, 206, 224, 0.35)', width: 1, style: 2 },
+      horzLine: { color: 'rgba(195, 206, 224, 0.35)', width: 1, style: 2 },
     },
     rightPriceScale: { borderColor: 'rgba(255, 255, 255, 0.1)' },
     timeScale: {
@@ -56,16 +56,16 @@ export function initChart() {
       secondsVisible: false,
     },
     width: container.clientWidth,
-    height: (container.clientHeight || 500) * 0.7,
+    height: container.clientHeight || 500,
   });
 
   candlestickSeries = chart.addSeries(CandlestickSeries, {
-    upColor: '#10b981',
-    downColor: '#ef4444',
-    borderDownColor: '#ef4444',
-    borderUpColor: '#10b981',
-    wickDownColor: '#ef4444',
-    wickUpColor: '#10b981',
+    upColor: '#16C784',
+    downColor: '#FF4757',
+    borderDownColor: '#FF4757',
+    borderUpColor: '#16C784',
+    wickDownColor: '#FF4757',
+    wickUpColor: '#16C784',
   });
 
   volumeSeries = chart.addSeries(HistogramSeries, {
@@ -145,8 +145,8 @@ export function initChart() {
       },
       crosshair: {
         mode: 0,
-        vertLine: { color: 'rgba(99, 102, 241, 0.3)', width: 1, style: 2 },
-        horzLine: { color: 'rgba(99, 102, 241, 0.3)', width: 1, style: 2 },
+        vertLine: { color: 'rgba(195, 206, 224, 0.35)', width: 1, style: 2 },
+        horzLine: { color: 'rgba(195, 206, 224, 0.35)', width: 1, style: 2 },
       },
       width: rsiContainer.clientWidth,
       height: rsiContainer.clientHeight || 120,
@@ -185,7 +185,7 @@ export function initChart() {
   const resizeObserver = new ResizeObserver(entries => {
     for (const entry of entries) {
       const { width } = entry.contentRect;
-      chart?.applyOptions({ width, height: (entry.contentRect.height || 500) * 0.7 });
+      chart?.applyOptions({ width, height: entry.contentRect.height || 500 });
     }
   });
   resizeObserver.observe(container);

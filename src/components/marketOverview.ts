@@ -16,9 +16,10 @@ export function renderMarketCards(data: any[], marketCtx?: MarketContext) {
     const sign = change > 0 ? '+' : '';
 
     const name = index.name || index.ticker || 'N/A';
-    const advances = index.advances || Math.floor(Math.random() * 200 + 100);
-    const declines = index.declines || Math.floor(Math.random() * 150 + 80);
-    const unchanged = index.unchanged || Math.floor(Math.random() * 50 + 20);
+    const advances = index.advances || 0;
+    const declines = index.declines || 0;
+    const unchanged = index.unchanged || 0;
+    const hasBreadth = advances + declines + unchanged > 0;
     const adTotal = advances + declines + unchanged || 1;
     const advPct = (advances / adTotal) * 100;
     const decPct = (declines / adTotal) * 100;
@@ -34,6 +35,7 @@ export function renderMarketCards(data: any[], marketCtx?: MarketContext) {
         <div class="market-card-change ${direction}">
           <span>${sign}${change.toFixed(2)} điểm</span>
         </div>
+        ${hasBreadth ? `
         <div class="ad-bar" title="${advances} tăng / ${declines} giảm / ${unchanged} đứng giá">
           <div class="ad-bar-seg ad-up" style="width:${advPct}%"></div>
           <div class="ad-bar-seg ad-flat" style="width:${uncPct}%"></div>
@@ -52,7 +54,7 @@ export function renderMarketCards(data: any[], marketCtx?: MarketContext) {
             <span style="color: var(--red)">▼</span>
             <span class="stat-value">${declines}</span>
           </div>
-        </div>
+        </div>` : ''}
       </div>
     `;
   }).join('');
@@ -64,50 +66,14 @@ export function renderMarketCards(data: any[], marketCtx?: MarketContext) {
 
 // Small live-data strip under the hero title, so the landing view reads as
 // "here's today's market" rather than pure marketing copy above the fold.
-export function renderHeroQuickStats(data: any[], ctx?: MarketContext) {
-  const el = document.getElementById('heroQuickStats');
-  if (!el) return;
-
-  const vnindex = data.find(d => d.ticker === 'VNINDEX');
-  if (!vnindex) return;
-
-  const change = typeof vnindex.change === 'number' ? vnindex.change : 0;
-  const pctChange = typeof vnindex.pctChange === 'number' ? vnindex.pctChange : 0;
-  const direction = change > 0 ? 'up' : change < 0 ? 'down' : 'neutral';
-  const arrow = change > 0 ? '▲' : change < 0 ? '▼' : '●';
-  const sign = change > 0 ? '+' : '';
-
-  const regimeEmoji = ctx?.regime === 'BULL' ? '🐂' : ctx?.regime === 'BEAR' ? '🐻' : '🦀';
-  const regimeLabel = ctx?.regime === 'BULL' ? 'Thị trường tăng' : ctx?.regime === 'BEAR' ? 'Thị trường giảm' : 'Đi ngang';
-
-  el.innerHTML = `
-    <div class="hero-stat">
-      <span class="hero-stat-label">VN-INDEX</span>
-      <span class="hero-stat-value ${direction}">${vnindex.close.toFixed(2)} <small>${arrow} ${sign}${pctChange.toFixed(2)}%</small></span>
-    </div>
-    <div class="hero-stat-divider"></div>
-    <div class="hero-stat">
-      <span class="hero-stat-label">Xu hướng</span>
-      <span class="hero-stat-value">${regimeEmoji} ${regimeLabel}</span>
-    </div>
-    ${ctx ? `
-    <div class="hero-stat-divider"></div>
-    <div class="hero-stat">
-      <span class="hero-stat-label">Sức khỏe TT</span>
-      <span class="hero-stat-value">${ctx.healthScore}<small>/100</small></span>
-    </div>` : ''}
-  `;
-}
-
 function renderRegimePanel(ctx: MarketContext): string {
-  const regimeEmoji = ctx.regime === 'BULL' ? '🐂' : ctx.regime === 'BEAR' ? '🐻' : '↔️';
   const regimeLabel = ctx.regime === 'BULL' ? 'Tăng giá' : ctx.regime === 'BEAR' ? 'Giảm giá' : 'Sideway';
   const regimeClass = ctx.regime === 'BULL' ? 'regime-bull' : ctx.regime === 'BEAR' ? 'regime-bear' : 'regime-sideways';
 
-  const volLabel = ctx.volatilityRegime === 'HIGH' ? '⚡ Cao' : ctx.volatilityRegime === 'LOW' ? '😴 Thấp' : '📊 TB';
+  const volLabel = ctx.volatilityRegime === 'HIGH' ? 'Cao' : ctx.volatilityRegime === 'LOW' ? 'Thấp' : 'Trung bình';
   const volClass = ctx.volatilityRegime === 'HIGH' ? 'vol-high' : ctx.volatilityRegime === 'LOW' ? 'vol-low' : 'vol-normal';
 
-  const healthColor = ctx.healthScore >= 65 ? '#10b981' : ctx.healthScore <= 35 ? '#ef4444' : '#f59e0b';
+  const healthColor = ctx.healthScore >= 65 ? 'var(--up)' : ctx.healthScore <= 35 ? 'var(--down)' : 'var(--ref)';
 
   // Top/bottom sectors
   const topSectors = ctx.topSectors.slice(0, 3);
@@ -116,7 +82,7 @@ function renderRegimePanel(ctx: MarketContext): string {
   return `
     <div class="market-card regime-card ${regimeClass}">
       <div class="regime-header">
-        <span class="regime-icon">${regimeEmoji}</span>
+        <span class="regime-eyebrow">Bối cảnh</span>
         <span class="regime-label">${regimeLabel}</span>
       </div>
       <div class="regime-health">
@@ -131,8 +97,8 @@ function renderRegimePanel(ctx: MarketContext): string {
           <span class="vol-badge ${volClass}">${volLabel}</span>
         </div>
         <div class="regime-detail-item">
-          <span>Vol Trend</span>
-          <span>${ctx.volumeTrend === 'INCREASING' ? '📈 Tăng' : ctx.volumeTrend === 'DECREASING' ? '📉 Giảm' : '➡️ Ổn định'}</span>
+          <span>Xu hướng KL</span>
+          <span>${ctx.volumeTrend === 'INCREASING' ? 'Tăng' : ctx.volumeTrend === 'DECREASING' ? 'Giảm' : 'Ổn định'}</span>
         </div>
         ${ctx.supportLevel > 0 ? `
         <div class="regime-detail-item">
@@ -148,11 +114,11 @@ function renderRegimePanel(ctx: MarketContext): string {
       ${topSectors.length > 0 ? `
       <div class="regime-sectors">
         <div class="sector-group">
-          <span class="sector-title">🔥 Top ngành</span>
+          <span class="sector-title">Dẫn dắt</span>
           ${topSectors.map(s => `<span class="sector-tag sector-up">${s.name} +${s.change.toFixed(1)}%</span>`).join('')}
         </div>
         <div class="sector-group">
-          <span class="sector-title">❄️ Yếu nhất</span>
+          <span class="sector-title">Yếu nhất</span>
           ${bottomSectors.map(s => `<span class="sector-tag sector-down">${s.name} ${s.change.toFixed(1)}%</span>`).join('')}
         </div>
       </div>` : ''}

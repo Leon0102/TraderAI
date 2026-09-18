@@ -55,14 +55,13 @@ export function renderShortTermSuggestions(signals: TechnicalSignal[]) {
   });
 
   const marketBadge = currentMarketContext
-    ? `<div class="market-context-badge">${currentMarketContext.regimeEmoji} ${currentMarketContext.regimeLabel}</div>`
+    ? `<div class="market-context-badge">Bối cảnh: ${currentMarketContext.regimeLabel}</div>`
     : '';
 
   container.innerHTML = marketBadge + sorted.slice(0, 6).map(signal => {
     const signalClass = signal.signal === 'BUY' ? 'signal-buy' :
                         signal.signal === 'SELL' ? 'signal-sell' : 'signal-hold';
-    const signalText = signal.signal === 'BUY' ? '🟢 MUA' :
-                       signal.signal === 'SELL' ? '🔴 BÁN' : '🟡 GIỮ';
+    const signalText = signal.signal === 'BUY' ? 'MUA' : signal.signal === 'SELL' ? 'BÁN' : 'GIỮ';
     const riskClass = `risk-${signal.risk.toLowerCase()}`;
     const riskText = signal.risk === 'LOW' ? 'Thấp' : signal.risk === 'MEDIUM' ? 'TB' : 'Cao';
     const watched = isInWatchlist(signal.ticker);
@@ -149,8 +148,7 @@ export function renderLongTermSuggestions(signals: FundamentalSignal[]) {
   container.innerHTML = sorted.slice(0, 6).map(signal => {
     const signalClass = signal.signal === 'BUY' ? 'signal-buy' :
                         signal.signal === 'SELL' ? 'signal-sell' : 'signal-hold';
-    const signalText = signal.signal === 'BUY' ? '🟢 ĐẦU TƯ' :
-                       signal.signal === 'SELL' ? '🔴 TRÁNH' : '🟡 THEO DÕI';
+    const signalText = signal.signal === 'BUY' ? 'ĐẦU TƯ' : signal.signal === 'SELL' ? 'TRÁNH' : 'THEO DÕI';
     const watched = isInWatchlist(signal.ticker);
     const bd = signal.scoreBreakdown;
 
@@ -219,7 +217,7 @@ export function renderCombinedSuggestions(techSignals: TechnicalSignal[], fundSi
 
   const marketBadge = currentMarketContext
     ? `<div class="market-context-badge combined-market-badge">
-         ${currentMarketContext.regimeEmoji} ${currentMarketContext.regimeLabel}
+         Bối cảnh: ${currentMarketContext.regimeLabel}
          <span class="market-health-mini">Sức khỏe: ${currentMarketContext.healthScore}/100</span>
          <span class="market-weights-mini">Tỷ trọng: KT ${Math.round(weights.techWeight * 100)}% / CB ${Math.round(weights.fundWeight * 100)}%</span>
        </div>`

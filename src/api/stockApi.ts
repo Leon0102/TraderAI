@@ -176,6 +176,29 @@ export async function fetchStockBars(
   return generateMockBars(ticker, countBack);
 }
 
+/**
+ * Daily bars lag the live board: intraday, the last bar is still yesterday's close.
+ * Analysing those bars while showing the live price produces plans anchored to the
+ * wrong price (target below market). Append today's session as a bar so levels,
+ * indicators and the quoted price all refer to the same number.
+ */
+export function withLiveBar(bars: StockBar[], live?: { close?: number; high?: number; low?: number; refPrice?: number; volume?: number }): StockBar[] {
+  if (!bars.length || !live?.close) return bars;
+  const today = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
+  const last = bars[bars.length - 1];
+  const liveBar: StockBar = {
+    tradingDate: today,
+    open: live.refPrice ? live.refPrice / 1000 : last.close,
+    high: live.high || live.close,
+    low: live.low || live.close,
+    close: live.close,
+    volume: live.volume || 0,
+  };
+  return last.tradingDate === today ? [...bars.slice(0, -1), liveBar] : [...bars, liveBar];
+}
+
 export async function fetchTopStocks(count: number = 20): Promise<any[]> {
   const data = await apiFetch(`/stocks?count=${count}`);
 

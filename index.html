@@ -8,7 +8,7 @@
   <meta name="keywords" content="chứng khoán, Việt Nam, đầu tư, cổ phiếu, VN-Index, phân tích kỹ thuật, RSI, MACD" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📈</text></svg>" />
 </head>
 <body>
@@ -16,10 +16,15 @@
     <!-- Header -->
     <header class="header" id="header">
       <div class="header-inner">
-        <div class="logo">
-          <span class="logo-icon">📈</span>
+        <a class="logo" href="#top" aria-label="TraderAI - về đầu trang">
+          <svg class="logo-mark" viewBox="0 0 28 28" aria-hidden="true">
+            <rect x="1.5" y="17" width="4.5" height="9.5" rx="1"/>
+            <rect x="8.5" y="11" width="4.5" height="15.5" rx="1"/>
+            <rect x="15.5" y="6" width="4.5" height="20.5" rx="1"/>
+            <rect x="22.5" y="1.5" width="4.5" height="25" rx="1" class="logo-mark-top"/>
+          </svg>
           <span class="logo-text">Trader<span class="logo-ai">AI</span></span>
-        </div>
+        </a>
 
         <!-- Search Bar -->
         <div class="search-wrapper">
@@ -31,7 +36,8 @@
         </div>
 
         <nav class="nav">
-          <a href="#market" class="nav-link active" data-section="market">Thị Trường</a>
+          <a href="#picks" class="nav-link active" data-section="picks">Top 10</a>
+          <a href="#market" class="nav-link" data-section="market">Thị Trường</a>
           <a href="#agentCouncilSection" class="nav-link" data-section="council">Hội Đồng AI</a>
           <a href="#suggestions" class="nav-link" data-section="suggestions">Gợi Ý</a>
           <a href="#chart" class="nav-link" data-section="chart">Biểu Đồ</a>
@@ -58,32 +64,51 @@
       </div>
     </section>
 
-    <!-- Hero Section -->
-    <section class="hero">
-      <div class="hero-bg"></div>
-      <div class="hero-content">
-        <h1 class="hero-title">Chứng Khoán <span class="gradient-text">Thông Minh</span></h1>
-        <p class="hero-subtitle">Phân tích chuyên sâu từ Kỹ Thuật đến Cơ Bản</p>
-        <div class="hero-quick-stats" id="heroQuickStats"></div>
+    <!-- Session band: what the market is doing right now -->
+    <section class="session-band" id="top">
+      <div class="container session-inner">
+        <div class="session-now">
+          <div class="session-date" id="sessionDate">—</div>
+          <div class="session-phase" id="sessionPhase"></div>
+          <p class="session-note">Mua hôm nay, cổ phiếu về tài khoản chiều T+2. Mọi khuyến nghị dưới đây tính theo chu kỳ đó.</p>
+        </div>
+        <div class="session-indices" id="sessionIndices"></div>
+      </div>
+    </section>
+
+    <!-- Daily picks: the page's main answer -->
+    <section class="section section-picks" id="picks">
+      <div class="container">
+        <div class="section-header">
+          <div class="section-heading">
+            <span class="eyebrow">Chốt đầu phiên</span>
+            <h2 class="section-title">10 mã tiềm năng hôm nay</h2>
+            <p class="section-lede">Xếp hạng từ toàn bộ HOSE + HNX theo thanh khoản, khối lượng đột biến, tín hiệu kỹ thuật, nền tảng cơ bản và tin tức. Danh sách chốt một lần mỗi phiên để bạn theo dõi xuyên ngày.</p>
+          </div>
+          <div class="picks-actions">
+            <span class="picks-stamp" id="picksStamp"></span>
+            <button class="btn-ghost" id="picksRefresh" type="button">Chốt lại danh sách</button>
+          </div>
+        </div>
+        <div class="picks-board" id="picksBoard">
+          <div class="detail-loading"><div class="spinner small"></div></div>
+        </div>
       </div>
     </section>
 
     <!-- Market Overview -->
     <section class="section" id="market">
       <div class="container">
-        <h2 class="section-title">
-          <span class="section-icon">🏛️</span>
-          Tổng Quan Thị Trường
-        </h2>
+        <div class="section-heading">
+          <span class="eyebrow">Toàn cảnh</span>
+          <h2 class="section-title">Thị trường hôm nay</h2>
+        </div>
         <div class="market-cards" id="marketCards">
           <!-- Cards injected by JS -->
         </div>
 
         <!-- Heatmap -->
-        <h3 class="subsection-title">
-          <span class="section-icon">🗺️</span>
-          Bản Đồ Thị Trường (Top thanh khoản HOSE + HNX hôm nay)
-        </h3>
+        <h3 class="subsection-title">Bản đồ thanh khoản <span class="subsection-note">Top giao dịch HOSE + HNX</span></h3>
         <div class="heatmap-grid" id="heatmapGrid">
           <div class="detail-loading"><div class="spinner small"></div></div>
         </div>
@@ -93,10 +118,10 @@
     <!-- News Section -->
     <section class="section" id="newsSection">
       <div class="container">
-        <h2 class="section-title">
-          <span class="section-icon">📰</span>
-          Tin Tức & Sentiment Thị Trường
-        </h2>
+        <div class="section-heading">
+          <span class="eyebrow">Dòng tin</span>
+          <h2 class="section-title">Tin tức &amp; tâm lý thị trường</h2>
+        </div>
         <div id="newsContent">
           <div class="detail-loading"><div class="spinner small"></div></div>
         </div>
@@ -107,10 +132,10 @@
     <section class="section" id="stocks">
       <div class="container">
         <div class="section-header">
-          <h2 class="section-title">
-            <span class="section-icon">📊</span>
-            Bảng Giá Cổ Phiếu
-          </h2>
+          <div class="section-heading">
+            <span class="eyebrow">Bảng điện</span>
+            <h2 class="section-title">Giá và dòng tiền</h2>
+          </div>
           <div class="table-tabs" id="tableTabs">
             <button class="tab active" data-tab="top-volume">Top Volume</button>
             <button class="tab" data-tab="top-rvol">Top RVOL</button>
@@ -147,10 +172,10 @@
     <section class="section section-dark" id="suggestions">
       <div class="container">
         <div class="section-header">
-          <h2 class="section-title">
-            <span class="section-icon">🤖</span>
-            Gợi Ý Đầu Tư AI
-          </h2>
+          <div class="section-heading">
+            <span class="eyebrow">Phân tích</span>
+            <h2 class="section-title">Gợi ý đầu tư</h2>
+          </div>
           <div class="table-tabs" id="suggestionTabs">
             <button class="tab active" data-tab="short-term">Kỹ Thuật (Ngắn hạn)</button>
             <button class="tab" data-tab="long-term">Cơ Bản (Dài hạn)</button>
@@ -187,10 +212,10 @@
     <!-- Capital Allocator -->
     <section class="section" id="allocator">
       <div class="container">
-        <h2 class="section-title">
-          <span class="section-icon">💰</span>
-          Phân Bổ Vốn Đầu Tư
-        </h2>
+        <div class="section-heading">
+          <span class="eyebrow">Danh mục</span>
+          <h2 class="section-title">Phân bổ vốn</h2>
+        </div>
         <p class="allocator-intro">Nhập số vốn bạn có, hệ thống sẽ đề xuất mua bao nhiêu cổ phiếu (theo lô 100) ở các mã đang có tín hiệu MUA mạnh nhất từ phân tích Tổng Hợp ở trên.</p>
 
         <div class="allocator-form">
@@ -215,10 +240,10 @@
     <section class="section" id="chart">
       <div class="container">
         <div class="section-header">
-          <h2 class="section-title">
-            <span class="section-icon">📈</span>
-            Biểu Đồ Phân Tích Kỹ Thuật
-          </h2>
+          <div class="section-heading">
+            <span class="eyebrow">Biểu đồ</span>
+            <h2 class="section-title">Phân tích kỹ thuật</h2>
+          </div>
         </div>
 
         <!-- Chart Toolbar -->
@@ -273,7 +298,7 @@
       <div class="container">
         <div class="footer-inner">
           <div class="footer-brand">
-            <span class="logo-icon">📈</span>
+            <svg class="logo-mark" viewBox="0 0 28 28" aria-hidden="true"><rect x="1.5" y="17" width="4.5" height="9.5" rx="1"/><rect x="8.5" y="11" width="4.5" height="15.5" rx="1"/><rect x="15.5" y="6" width="4.5" height="20.5" rx="1"/><rect x="22.5" y="1.5" width="4.5" height="25" rx="1" class="logo-mark-top"/></svg>
             <span class="logo-text">Trader<span class="logo-ai">AI</span></span>
           </div>
           <p class="footer-disclaimer">⚠️ Thông tin chỉ mang tính chất tham khảo, không phải lời khuyên đầu tư. Hãy tự phân tích hoặc tham khảo ý kiến chuyên gia trước khi quyết định.</p>

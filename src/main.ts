@@ -2,8 +2,11 @@
 // Vietnamese Stock Market Dashboard with Real-time Data & Investment Suggestions
 
 import './style.css';
-import { fetchMarketOverview, fetchTopStocks, fetchStockBars, fetchMultipleFinancials, fetchMarketAnalysis, fetchMarketNews, fetchMultipleTickerNews, isAnyDataMock } from './api/stockApi';
-import { renderMarketCards, renderHeroQuickStats } from './components/marketOverview';
+import { fetchMarketOverview, fetchTopStocks, fetchStockBars, fetchMultipleFinancials, fetchMarketAnalysis, fetchMarketNews, fetchMultipleTickerNews, isAnyDataMock, withLiveBar } from './api/stockApi';
+import { renderMarketCards } from './components/marketOverview';
+import { renderSessionBand } from './components/sessionBand';
+import { initDailyPicks, setDailyPicks } from './components/dailyPicks';
+import type { PickMeta } from './components/dailyPicks';
 import { initStockTable, renderStockTable } from './components/stockTable';
 import { initChart, updateChartData } from './components/stockChart';
 import { renderShortTermSuggestions, renderLongTermSuggestions, renderCombinedSuggestions, setMarketContext, setNewsSignals, getCombinedSignals } from './components/suggestions';
@@ -51,7 +54,7 @@ async function loadMarketOverview() {
     setMarketContext(marketCtx);
 
     renderMarketCards(data, marketCtx);
-    renderHeroQuickStats(data, marketCtx);
+    renderSessionBand(data, marketCtx);
   } catch (e) {
     console.error('Market overview error:', e);
   }
@@ -95,6 +98,7 @@ async function loadSuggestions() {
 
     // Foreign net buy/sell as a fraction of today's volume, from the top-stocks
     // price board we already fetched - an independent signal price bars can't give.
+    const liveByTicker = new Map<string, any>(topStocks.map((s: any) => [s.ticker, s]));
     const foreignNetRatioByTicker = new Map<string, number>();
     for (const s of topStocks) {
       if (s.ticker && typeof s.foreignNetVolume === 'number' && s.volume) {
@@ -107,7 +111,8 @@ async function loadSuggestions() {
       // Tech analysis - fetch 200 bars for Ichimoku/MA Ribbon
       Promise.all(tickers.map(async (ticker) => {
         const bars = await fetchStockBars(ticker, 'D', 200);
-        return analyzeShortTerm(ticker, bars, foreignNetRatioByTicker.get(ticker));
+        // Same price the board shows, so the plan's levels bracket the live price
+        return analyzeShortTerm(ticker, withLiveBar(bars, liveByTicker.get(ticker)), foreignNetRatioByTicker.get(ticker));
       })),
       // Fund analysis
       fetchMultipleFinancials(tickers),
@@ -130,6 +135,17 @@ async function loadSuggestions() {
     renderCombinedSuggestions(techSignals, fundSignals);
     const combined = getCombinedSignals(techSignals, fundSignals);
     setAllocatorSignals(combined);
+
+    const pickMeta = new Map<string, PickMeta>(topStocks.map((s: any) => [s.ticker, {
+      companyName: s.companyName,
+      exchange: s.exchange,
+      close: s.close,
+      pctChange: s.pctChange,
+      ceiling: s.ceiling,
+      floor: s.floor,
+      rvol: s.rvol,
+    }]));
+    setDailyPicks(combined, pickMeta);
     updateChartRecommendedOptgroup(combined);
   } catch (e) {
     console.error('Suggestions error:', e);
@@ -204,6 +220,7 @@ async function init() {
   initChart();
   initCapitalAllocator();
   initAgentCouncil();
+  initDailyPicks();
   // Login only exists on the deployed site (Vercel middleware), not the local dev server
   const logoutLink = document.getElementById('logoutLink');
   if (logoutLink && !['localhost', '127.0.0.1'].includes(location.hostname)) logoutLink.hidden = false;

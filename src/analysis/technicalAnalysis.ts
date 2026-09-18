@@ -14,6 +14,8 @@ export interface TechnicalSignal {
   metrics: Record<string, number>;
   risk: 'LOW' | 'MEDIUM' | 'HIGH';
   supportLevel: number;
+  /** Where to accumulate: structure support when it is within reach, else just under market. */
+  entryPrice: number;
   resistanceLevel: number;
   targetPrice: number;
   stopLoss: number;
@@ -570,8 +572,8 @@ export function detectPattern(bars: StockBar[]): string {
     if (lows[i] < lows[i - 1]) lowerLows++;
   }
 
-  if (higherHighs >= 5 && higherLows >= 4) return '📈 Uptrend (Higher Highs)';
-  if (lowerHighs >= 5 && lowerLows >= 4) return '📉 Downtrend (Lower Lows)';
+  if (higherHighs >= 5 && higherLows >= 4) return 'Uptrend (Higher Highs)';
+  if (lowerHighs >= 5 && lowerLows >= 4) return 'Downtrend (Lower Lows)';
 
   // Double Bottom detection
   const mid = Math.floor(recent.length / 2);
@@ -582,7 +584,7 @@ export function detectPattern(bars: StockBar[]): string {
   const midMax = Math.max(...recent.slice(mid - 3, mid + 3));
 
   if (Math.abs(firstMin - secondMin) / firstMin < 0.03 && midMax > firstMin * 1.03) {
-    return '🔵 Double Bottom (Đáy kép - Tín hiệu đảo chiều tăng)';
+    return 'Double Bottom (Đáy kép - Tín hiệu đảo chiều tăng)';
   }
 
   // Double Top detection
@@ -591,7 +593,7 @@ export function detectPattern(bars: StockBar[]): string {
   const midMin = Math.min(...recent.slice(mid - 3, mid + 3));
 
   if (Math.abs(firstMax - secondMax) / firstMax < 0.03 && midMin < firstMax * 0.97) {
-    return '🔴 Double Top (Đỉnh kép - Tín hiệu đảo chiều giảm)';
+    return 'Double Top (Đỉnh kép - Tín hiệu đảo chiều giảm)';
   }
 
   // Head & Shoulders detection (5 segments)
@@ -613,7 +615,7 @@ export function detectPattern(bars: StockBar[]): string {
     const shoulderDiff = Math.abs(leftShoulder - rightShoulder) / leftShoulder;
 
     if (shoulderDiff < 0.05 && head > leftShoulder * 1.02 && head > rightShoulder * 1.02) {
-      return '🔴 Head & Shoulders (Vai-Đầu-Vai - Tín hiệu giảm mạnh)';
+      return 'Head & Shoulders (Vai-Đầu-Vai - Tín hiệu giảm mạnh)';
     }
     // Inverse H&S
     const leftTrough = segments[0].low;
@@ -622,7 +624,7 @@ export function detectPattern(bars: StockBar[]): string {
     const troughDiff = Math.abs(leftTrough - rightTrough) / leftTrough;
 
     if (troughDiff < 0.05 && headTrough < leftTrough * 0.98 && headTrough < rightTrough * 0.98) {
-      return '🟢 Inverse H&S (Vai-Đầu-Vai ngược - Tín hiệu tăng mạnh)';
+      return 'Inverse H&S (Vai-Đầu-Vai ngược - Tín hiệu tăng mạnh)';
     }
   }
 
@@ -638,14 +640,14 @@ export function detectPattern(bars: StockBar[]): string {
       // Ascending triangle: flat resistance, rising lows
       const flatHighs = h20.slice(-5).every((h, i, arr) => i === 0 || Math.abs(h - arr[0]) / arr[0] < 0.02);
       if (flatHighs && lows[lows.length - 1] > lows[0]) {
-        return '🟢 Ascending Triangle (Tam giác tăng - Breakout tăng)';
+        return 'Ascending Triangle (Tam giác tăng - Breakout tăng)';
       }
       // Descending triangle: flat support, falling highs
       const flatLows = l20.slice(-5).every((l, i, arr) => i === 0 || Math.abs(l - arr[0]) / arr[0] < 0.02);
       if (flatLows && highs[highs.length - 1] < highs[0]) {
-        return '🔴 Descending Triangle (Tam giác giảm - Breakout giảm)';
+        return 'Descending Triangle (Tam giác giảm - Breakout giảm)';
       }
-      return '🟡 Symmetrical Triangle (Tam giác cân - Chờ breakout)';
+      return 'Symmetrical Triangle (Tam giác cân - Chờ breakout)';
     }
   }
 
@@ -657,14 +659,14 @@ export function detectPattern(bars: StockBar[]): string {
     const flagRange = (Math.max(...flag.map(b => b.high)) - Math.min(...flag.map(b => b.low))) / flag[0].close;
 
     if (Math.abs(preMove) > 0.05 && flagRange < 0.03) {
-      if (preMove > 0) return '🟢 Bull Flag (Cờ tăng - Tiếp tục tăng)';
-      return '🔴 Bear Flag (Cờ giảm - Tiếp tục giảm)';
+      if (preMove > 0) return 'Bull Flag (Cờ tăng - Tiếp tục tăng)';
+      return 'Bear Flag (Cờ giảm - Tiếp tục giảm)';
     }
   }
 
   // Consolidation
   const range = (Math.max(...recent) - Math.min(...recent)) / Math.min(...recent);
-  if (range < 0.05) return '🟡 Sideway (Tích lũy - Chờ breakout)';
+  if (range < 0.05) return 'Sideway (Tích lũy - Chờ breakout)';
 
   return '➡️ Trung tính';
 }
@@ -678,7 +680,7 @@ export function analyzeShortTerm(ticker: string, bars: StockBar[], foreignNetRat
     return {
       ticker, signal: 'HOLD', strength: 50,
       reasons: ['Không đủ dữ liệu phân tích'], metrics: {},
-      risk: 'MEDIUM', supportLevel: 0, resistanceLevel: 0,
+      risk: 'MEDIUM', supportLevel: 0, entryPrice: 0, resistanceLevel: 0,
       targetPrice: 0, stopLoss: 0, pattern: '',
       fibLevels: { level236: 0, level382: 0, level500: 0, level618: 0, level786: 0, high: 0, low: 0, trend: 'UP' as const },
       tradeType: 'SWING', entryZone: { low: 0, high: 0 },
@@ -899,11 +901,24 @@ export function analyzeShortTerm(ticker: string, bars: StockBar[], foreignNetRat
   const atrPct = !isNaN(lastATR) ? (lastATR / lastPrice) * 100 : 2;
   const risk: 'LOW' | 'MEDIUM' | 'HIGH' = atrPct < 2 ? 'LOW' : atrPct < 4 ? 'MEDIUM' : 'HIGH';
 
-  // Calculate target price and stop loss (enhanced with Fibonacci)
-  const targetPrice = fib.trend === 'UP'
-    ? Math.max(lastPrice + (blendedResistance - lastPrice) * 0.8, fib.level236)
-    : lastPrice + (blendedResistance - lastPrice) * 0.6;
-  const stopLoss = Math.max(blendedSupport, lastPrice - (isNaN(lastATR) ? lastPrice * 0.03 : lastATR * 2));
+  // Target and stop for a long setup. Structure (resistance / fib extension /
+  // swing support) leads, but a breakout puts the price ABOVE resistance and a
+  // breakdown puts it BELOW support - so both levels are clamped to the right
+  // side of the current price, or the plan reads as "buy at 74, target 72".
+  const atrAbs = !isNaN(lastATR) && lastATR > 0 ? lastATR : lastPrice * 0.02;
+  const structuralTarget = Math.max(blendedResistance, fib.level236);
+  const stopLoss = Math.min(
+    Math.max(blendedSupport, lastPrice - atrAbs * 1.5),
+    lastPrice - atrAbs * 0.8,
+    lastPrice * 0.985,
+  );
+  // Reward must clear the risk being taken, or there is nothing to act on:
+  // take structure when it is further away, else 1.6x the distance to the stop.
+  const riskPerShare = lastPrice - stopLoss;
+  const targetPrice = Math.max(
+    structuralTarget > lastPrice ? lastPrice + (structuralTarget - lastPrice) * 0.8 : 0,
+    lastPrice + riskPerShare * 1.6,
+  );
 
   // R/R ratio
   const rrRatio = stopLoss < lastPrice && targetPrice > lastPrice
@@ -956,6 +971,7 @@ export function analyzeShortTerm(ticker: string, bars: StockBar[], foreignNetRat
   return {
     ticker, signal, strength, reasons, metrics, risk,
     supportLevel: Math.round(blendedSupport * 100) / 100,
+    entryPrice: Math.round(Math.max(blendedSupport, lastPrice * 0.98) * 100) / 100,
     resistanceLevel: Math.round(blendedResistance * 100) / 100,
     targetPrice: Math.round(targetPrice * 100) / 100,
     stopLoss: Math.round(stopLoss * 100) / 100,
