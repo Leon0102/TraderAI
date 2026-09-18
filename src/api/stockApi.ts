@@ -111,8 +111,22 @@ const REAL_SOURCES = new Set(['tcbs', 'vnstock', 'vci', 'ssi', 'dnse', 'rss', 't
 // Read this from the UI to warn users when the dashboard is showing demo data.
 export const dataSourceStatus: Record<string, 'real' | 'mock'> = {};
 
-function recordSource(key: string, source: string | undefined) {
-  dataSourceStatus[key] = source && REAL_SOURCES.has(source) ? 'real' : 'mock';
+export interface FeedProvenance {
+  source: string;
+  fetchedAt: string;
+  asOf?: string;
+  isMock: boolean;
+}
+const feedProvenance: Record<string, FeedProvenance> = {};
+
+export function getFeedProvenance(key: string): FeedProvenance | undefined {
+  return feedProvenance[key];
+}
+
+function recordSource(key: string, source: string | undefined, asOf?: string) {
+  const isMock = !source || !REAL_SOURCES.has(source);
+  dataSourceStatus[key] = isMock ? 'mock' : 'real';
+  feedProvenance[key] = { source: isMock ? 'mock' : source, fetchedAt: new Date().toISOString(), asOf, isMock };
 }
 
 export function isAnyDataMock(): boolean {
@@ -167,13 +181,23 @@ export async function fetchStockBars(
   const data = await apiFetch(`/history?ticker=${ticker}&start=${start}&end=${end}&resolution=${resolution}`);
 
   if (data && data.data && data.data.length > 0) {
-    recordSource('history', data.source);
+    recordSource('history', data.source, data.data.at(-1)?.tradingDate);
+    recordSource(`history:${ticker}`, data.source, data.data.at(-1)?.tradingDate);
     return data.data;
   }
 
   // Fallback mock data
   recordSource('history', undefined);
+  recordSource(`history:${ticker}`, undefined);
   return generateMockBars(ticker, countBack);
+}
+
+/** Evaluation must never fall back to generated prices. */
+export async function fetchEvaluationBars(ticker: string, start: string): Promise<StockBar[] | null> {
+  const end = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh',
+    year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const data = await apiFetch(`/history?ticker=${encodeURIComponent(ticker)}&start=${start}&end=${end}&resolution=D`, 0);
+  return data?.data?.length && REAL_SOURCES.has(data.source) ? data.data as StockBar[] : null;
 }
 
 /**
@@ -203,7 +227,7 @@ export async function fetchTopStocks(count: number = 20): Promise<any[]> {
   const data = await apiFetch(`/stocks?count=${count}`);
 
   if (data && data.data && data.data.length > 0) {
-    recordSource('stocks', data.source);
+    recordSource('stocks', data.source, data.data[0]?.tradingDate);
     return data.data;
   }
 
@@ -233,7 +257,7 @@ export async function fetchMarketOverview(): Promise<any[]> {
   const data = await apiFetch('/market');
 
   if (data && data.data) {
-    recordSource('market', data.source);
+    recordSource('market', data.source, data.data[0]?.tradingDate);
     return data.data;
   }
 
@@ -246,10 +270,12 @@ export async function fetchFinancialData(ticker: string): Promise<FinancialData 
 
   if (data && data.data) {
     recordSource('finance', data.source);
+    recordSource(`finance:${ticker}`, data.source);
     return data.data;
   }
 
   recordSource('finance', undefined);
+  recordSource(`finance:${ticker}`, undefined);
   return getMockFinancialData(ticker);
 }
 
@@ -275,7 +301,7 @@ export async function fetchMultipleFinancials(tickers: string[]): Promise<Financ
 export async function fetchTickerNews(ticker: string): Promise<{ articles: NewsArticle[]; sentiment: SentimentSummary }> {
   const data = await apiFetch(`/news?ticker=${encodeURIComponent(ticker)}`);
   if (data && data.articles) {
-    recordSource('news', data.source);
+    recordSource('news', data.source, data.articles[0]?.publishedAt);
     return { articles: data.articles, sentiment: data.sentiment };
   }
   recordSource('news', undefined);
@@ -285,10 +311,10 @@ export async function fetchTickerNews(ticker: string): Promise<{ articles: NewsA
 export async function fetchMarketNews(): Promise<{ articles: NewsArticle[]; sentiment: SentimentSummary }> {
   const data = await apiFetch('/news?action=market');
   if (data && data.articles) {
-    recordSource('news', data.source);
+    recordSource('marketNews', data.source, data.articles[0]?.publishedAt);
     return { articles: data.articles, sentiment: data.sentiment };
   }
-  recordSource('news', undefined);
+  recordSource('marketNews', undefined);
   return getMockTickerNews();
 }
 

@@ -7,11 +7,14 @@ import type { FundamentalSignal } from '../analysis/fundamentalAnalysis';
 import type { MarketContext } from '../analysis/marketAnalysis';
 import type { NewsSignal } from '../analysis/newsAnalysis';
 import { getMarketWeights } from '../analysis/marketAnalysis';
+import { scoreRecommendation } from '../analysis/recommendation';
+import type { Decision } from '../analysis/recommendation';
 import { openStockDetail } from './stockDetail';
 import { addToWatchlist, isInWatchlist } from './watchlist';
 
 let currentMarketContext: MarketContext | null = null;
 let newsSignals: Map<string, NewsSignal> = new Map();
+const escapeHtml = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 export function setMarketContext(ctx: MarketContext) {
   currentMarketContext = ctx;
@@ -27,6 +30,8 @@ export interface CombinedSignal {
   fundSignal: FundamentalSignal | undefined;
   newsSignal: NewsSignal | undefined;
   combinedScore: number;
+  decision: Decision;
+  warnings: string[];
 }
 
 // Shared by the combined-view cards and the capital allocator, so both use
@@ -37,14 +42,13 @@ export function getCombinedSignals(techSignals: TechnicalSignal[], fundSignals: 
   return techSignals.map(tech => {
     const fund = fundSignals.find(f => f.ticker === tech.ticker);
     const news = newsSignals.get(tech.ticker);
-    const newsBoost = news ? news.impactModifier * 0.3 : 0;
-    const rawScore = Math.round(tech.strength * weights.techWeight + (fund?.score ?? 50) * weights.fundWeight + newsBoost);
-    const combinedScore = Math.max(0, Math.min(100, rawScore - weights.riskPenalty));
-    return { ticker: tech.ticker, techSignal: tech, fundSignal: fund, newsSignal: news, combinedScore };
+    const verdict = scoreRecommendation(tech, fund, news, weights);
+    return { ticker: tech.ticker, techSignal: tech, fundSignal: fund, newsSignal: news,
+      combinedScore: verdict.score, decision: verdict.decision, warnings: verdict.warnings };
   }).sort((a, b) => b.combinedScore - a.combinedScore);
 }
 
-export function renderShortTermSuggestions(signals: TechnicalSignal[]) {
+export function renderShortTermSuggestions(signals: TechnicalSignal[], combined: CombinedSignal[]) {
   const container = document.getElementById('shortTermCards');
   if (!container) return;
 
@@ -59,9 +63,11 @@ export function renderShortTermSuggestions(signals: TechnicalSignal[]) {
     : '';
 
   container.innerHTML = marketBadge + sorted.slice(0, 6).map(signal => {
-    const signalClass = signal.signal === 'BUY' ? 'signal-buy' :
-                        signal.signal === 'SELL' ? 'signal-sell' : 'signal-hold';
-    const signalText = signal.signal === 'BUY' ? 'MUA' : signal.signal === 'SELL' ? 'BÁN' : 'GIỮ';
+    const overall = combined.find(item => item.ticker === signal.ticker);
+    const decision = overall?.decision ?? 'HOLD';
+    const score = overall?.combinedScore ?? 50;
+    const signalClass = decision === 'BUY' ? 'signal-buy' : decision === 'SELL' ? 'signal-sell' : 'signal-hold';
+    const signalText = decision === 'BUY' ? 'MUA' : decision === 'SELL' ? 'TRÁNH' : 'THEO DÕI';
     const riskClass = `risk-${signal.risk.toLowerCase()}`;
     const riskText = signal.risk === 'LOW' ? 'Thấp' : signal.risk === 'MEDIUM' ? 'TB' : 'Cao';
     const watched = isInWatchlist(signal.ticker);
@@ -79,8 +85,8 @@ export function renderShortTermSuggestions(signals: TechnicalSignal[]) {
       .map(([key, value]) => `<span class="metric-tag">${key}: ${typeof value === 'number' ? value.toFixed(1) : value}</span>`)
       .join('');
 
-    const reasonsHtml = signal.reasons.slice(0, 4)
-      .map(r => `• ${r}`)
+    const reasonsHtml = signal.reasons.slice(0, 2)
+      .map(r => `• ${escapeHtml(r)}`)
       .join('<br>');
 
     return `
@@ -98,14 +104,16 @@ export function renderShortTermSuggestions(signals: TechnicalSignal[]) {
 
         <div class="strength-meter">
           <div class="strength-meter-bar">
-            <div class="strength-meter-fill" style="width: ${signal.strength}%; background: ${signal.strength > 60 ? 'var(--green)' : signal.strength < 40 ? 'var(--red)' : 'var(--yellow)'};"></div>
+            <div class="strength-meter-fill" style="width: ${score}%; background: ${score > 64 ? 'var(--green)' : score < 36 ? 'var(--red)' : 'var(--yellow)'};"></div>
           </div>
-          <span class="strength-meter-value">${signal.strength}<small>/100</small></span>
+          <span class="strength-meter-value" title="Điểm tổng hợp">${score}<small>/100</small></span>
           <span class="confidence-badge ${confidenceClass}" title="Mức đồng thuận các chỉ báo">${consensus}% đồng thuận</span>
         </div>
 
-        <div class="trade-type-badge">${tradeType}</div>
+        <div class="trade-type-badge">${tradeType} · Kỹ thuật ${signal.strength}/100</div>
         <div class="suggestion-card-reason">${reasonsHtml}</div>
+        ${overall?.warnings.length ? `<div class="signal-warning">Cần lưu ý: ${overall.warnings.map(escapeHtml).join(' · ')}</div>` : ''}
+        <details class="analysis-details"><summary>Chỉ báo và kế hoạch giá</summary>
         <div class="suggestion-card-metrics">${metricsHtml}</div>
 
         <div class="suggestion-card-levels">
@@ -132,6 +140,7 @@ export function renderShortTermSuggestions(signals: TechnicalSignal[]) {
         </div>
 
         ${signal.pattern ? `<div class="suggestion-card-pattern">${signal.pattern}</div>` : ''}
+        </details>
       </div>
     `;
   }).join('');
@@ -139,16 +148,18 @@ export function renderShortTermSuggestions(signals: TechnicalSignal[]) {
   attachCardHandlers(container);
 }
 
-export function renderLongTermSuggestions(signals: FundamentalSignal[]) {
+export function renderLongTermSuggestions(signals: FundamentalSignal[], combined: CombinedSignal[]) {
   const container = document.getElementById('longTermCards');
   if (!container) return;
 
   const sorted = [...signals].sort((a, b) => b.score - a.score);
 
   container.innerHTML = sorted.slice(0, 6).map(signal => {
-    const signalClass = signal.signal === 'BUY' ? 'signal-buy' :
-                        signal.signal === 'SELL' ? 'signal-sell' : 'signal-hold';
-    const signalText = signal.signal === 'BUY' ? 'ĐẦU TƯ' : signal.signal === 'SELL' ? 'TRÁNH' : 'THEO DÕI';
+    const overall = combined.find(item => item.ticker === signal.ticker);
+    const decision = overall?.decision ?? 'HOLD';
+    const score = overall?.combinedScore ?? 50;
+    const signalClass = decision === 'BUY' ? 'signal-buy' : decision === 'SELL' ? 'signal-sell' : 'signal-hold';
+    const signalText = decision === 'BUY' ? 'MUA' : decision === 'SELL' ? 'TRÁNH' : 'THEO DÕI';
     const watched = isInWatchlist(signal.ticker);
     const bd = signal.scoreBreakdown;
 
@@ -163,8 +174,8 @@ export function renderLongTermSuggestions(signals: FundamentalSignal[]) {
       .map(([key, value]) => `<span class="metric-tag">${key}: ${value}</span>`)
       .join('');
 
-    const reasonsHtml = signal.reasons.slice(0, 4)
-      .map(r => `• ${r}`)
+    const reasonsHtml = signal.reasons.slice(0, 2)
+      .map(r => `• ${escapeHtml(r)}`)
       .join('<br>');
 
     return `
@@ -183,13 +194,15 @@ export function renderLongTermSuggestions(signals: FundamentalSignal[]) {
 
         <div class="strength-meter">
           <div class="strength-meter-bar">
-            <div class="strength-meter-fill" style="width: ${signal.score}%; background: ${signal.score > 60 ? 'var(--green)' : signal.score < 40 ? 'var(--red)' : 'var(--yellow)'};"></div>
+            <div class="strength-meter-fill" style="width: ${score}%; background: ${score > 64 ? 'var(--green)' : score < 36 ? 'var(--red)' : 'var(--yellow)'};"></div>
           </div>
-          <span class="strength-meter-value">${signal.score}<small>/100</small></span>
+          <span class="strength-meter-value" title="Điểm tổng hợp">${score}<small>/100</small></span>
         </div>
 
-        <div class="holding-period-badge">📅 ${signal.holdingPeriod}</div>
+        <div class="holding-period-badge">📅 ${signal.holdingPeriod} · Cơ bản ${signal.score}/100</div>
         <div class="suggestion-card-reason">${reasonsHtml}</div>
+        ${overall?.warnings.length ? `<div class="signal-warning">Cần lưu ý: ${overall.warnings.map(escapeHtml).join(' · ')}</div>` : ''}
+        <details class="analysis-details"><summary>Chỉ số tài chính và điểm thành phần</summary>
         <div class="suggestion-card-metrics">${metricsHtml}</div>
 
         <div class="score-breakdown-mini">
@@ -201,6 +214,7 @@ export function renderLongTermSuggestions(signals: FundamentalSignal[]) {
         </div>
 
         ${signal.intrinsicValue ? `<div class="suggestion-card-intrinsic">${signal.intrinsicValue}</div>` : ''}
+        </details>
       </div>
     `;
   }).join('');
@@ -225,9 +239,9 @@ export function renderCombinedSuggestions(techSignals: TechnicalSignal[], fundSi
 
   container.innerHTML = marketBadge + combined.slice(0, 6).map(item => {
     const s = item.combinedScore;
-    const signal = s >= 65 ? 'BUY' : s <= 35 ? 'SELL' : 'HOLD';
+    const signal = item.decision;
     const signalClass = signal === 'BUY' ? 'signal-buy' : signal === 'SELL' ? 'signal-sell' : 'signal-hold';
-    const signalText = signal === 'BUY' ? '🟢 KHUYẾN NGHỊ MUA' : signal === 'SELL' ? '🔴 KHUYẾN NGHỊ BÁN' : '🟡 THEO DÕI';
+    const signalText = signal === 'BUY' ? 'MUA' : signal === 'SELL' ? 'TRÁNH' : 'THEO DÕI';
 
     const consensus = item.techSignal.metrics['Consensus'] || 0;
     const investType = item.fundSignal?.investmentType || 'BALANCED';
@@ -263,6 +277,9 @@ export function renderCombinedSuggestions(techSignals: TechnicalSignal[], fundSi
           ${newsBadge}
           <span class="suggestion-card-signal ${signalClass}">${signalText}</span>
         </div>
+        <div class="combined-recommendation">${recommendation}</div>
+        ${item.warnings.length ? `<div class="signal-warning">Cần lưu ý: ${item.warnings.map(escapeHtml).join(' · ')}</div>` : ''}
+        <details class="analysis-details"><summary>Xem điểm thành phần và cách tính</summary>
         <div class="combined-scores">
           <div class="cs-item">
             <span class="cs-label">Kỹ thuật</span>
@@ -285,7 +302,6 @@ export function renderCombinedSuggestions(techSignals: TechnicalSignal[], fundSi
             <div class="cs-circle cs-main" style="--score: ${s}">${s}</div>
           </div>
         </div>
-        <div class="combined-recommendation">${recommendation}</div>
         <div style="margin-top: 8px;">
           <div style="display: flex; align-items: center; gap: 8px;">
             <div style="flex: 1; height: 5px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden;">
@@ -294,12 +310,14 @@ export function renderCombinedSuggestions(techSignals: TechnicalSignal[], fundSi
             <span style="font-size: 0.8rem; color: var(--text-muted); min-width: 45px; font-weight: 600;">${s}/100</span>
           </div>
         </div>
+        </details>
       </div>
     `;
   }).join('');
 
   container.querySelectorAll('.suggestion-card').forEach(card => {
-    card.addEventListener('click', () => {
+    card.addEventListener('click', (event) => {
+      if ((event.target as HTMLElement).closest('.analysis-details')) return;
       const ticker = (card as HTMLElement).dataset.ticker;
       if (ticker) openStockDetail(ticker);
     });
@@ -309,7 +327,7 @@ export function renderCombinedSuggestions(techSignals: TechnicalSignal[], fundSi
 function attachCardHandlers(container: HTMLElement) {
   container.querySelectorAll('.suggestion-card').forEach(card => {
     card.addEventListener('click', (e) => {
-      if ((e.target as HTMLElement).closest('.watch-btn')) return;
+      if ((e.target as HTMLElement).closest('.watch-btn, .analysis-details')) return;
       const ticker = (card as HTMLElement).dataset.ticker;
       if (ticker) openStockDetail(ticker);
     });

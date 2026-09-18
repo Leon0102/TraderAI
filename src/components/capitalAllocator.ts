@@ -7,7 +7,7 @@ import type { CombinedSignal } from './suggestions';
 import { openStockDetail } from './stockDetail';
 
 const LOT_SIZE = 100; // HOSE/HNX minimum order size
-const MIN_SCORE = 55; // below this we don't consider it a real BUY candidate
+const MIN_SCORE = 65;
 const MAX_POSITIONS = 8;
 
 let cachedSignals: CombinedSignal[] = [];
@@ -65,7 +65,7 @@ export function renderAllocation(capital: number) {
   if (!container) return;
 
   const candidates = cachedSignals
-    .filter(s => s.combinedScore >= MIN_SCORE && s.techSignal.entryZone.high > 0)
+    .filter(s => s.decision === 'BUY' && s.combinedScore >= MIN_SCORE && s.techSignal.entryZone.high > 0)
     .slice(0, MAX_POSITIONS);
 
   if (candidates.length === 0) {

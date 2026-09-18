@@ -112,6 +112,21 @@ h1, h2, h3, h4,
   border-radius: 4px;
 }
 
+.skip-link {
+  position: fixed;
+  top: 8px;
+  left: 12px;
+  z-index: 200;
+  padding: 9px 14px;
+  color: var(--bg-primary);
+  background: var(--text-primary);
+  border-radius: 6px;
+  transform: translateY(-150%);
+}
+.skip-link:focus { transform: translateY(0); }
+
+main section[id] { scroll-margin-top: 90px; }
+
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   *, *::before, *::after {
@@ -131,7 +146,7 @@ h1, h2, h3, h4,
    Header
    =========================== */
 .header {
-  position: fixed;
+  position: sticky;
   top: 0;
   left: 0;
   right: 0;
@@ -253,6 +268,13 @@ h1, h2, h3, h4,
   animation: pulse 2s ease-in-out infinite;
 }
 
+.live-indicator.is-unavailable { color: var(--ref); }
+.live-indicator.is-unavailable .live-dot {
+  background: var(--ref);
+  animation: none;
+  box-shadow: none;
+}
+
 @keyframes pulse {
   0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.6); }
   50% { opacity: 0.8; box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
@@ -267,7 +289,7 @@ h1, h2, h3, h4,
    Session band - what the market is doing right now
    =========================== */
 .session-band {
-  margin-top: 65px;
+  margin-top: 0;
   padding: 26px 0 22px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.035) 0%, transparent 100%);
   border-bottom: 1px solid var(--line);
@@ -1267,30 +1289,6 @@ h1, h2, h3, h4,
   color: var(--text-muted);
 }
 
-/* ===========================
-   Loading
-   =========================== */
-.loading-overlay {
-  position: fixed;
-  inset: 0;
-  background: var(--bg-primary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  transition: opacity 0.5s ease, visibility 0.5s ease;
-}
-
-.loading-overlay.hidden {
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
-}
-
-.loading-spinner {
-  text-align: center;
-}
-
 .spinner {
   width: 48px;
   height: 48px;
@@ -1524,7 +1522,7 @@ h1, h2, h3, h4,
 
 /* Watchlist */
 .watchlist-section {
-  padding: 80px 0 20px; /* Offset for fixed header */
+  padding: 20px 0;
   background: linear-gradient(to bottom, var(--bg-primary), var(--bg-secondary));
 }
 
@@ -4444,4 +4442,140 @@ h1, h2, h3, h4,
   font-size: 0.7rem;
   letter-spacing: 0.06em;
   color: var(--text-muted);
+}
+
+/* Loading and recovery stay inside the affected panel. */
+.skeleton-card {
+  min-height: 174px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(100deg, var(--bg-card) 25%, var(--bg-card-hover) 45%, var(--bg-card) 65%);
+  background-size: 220% 100%;
+  animation: skeleton-shift 1.8s ease-in-out infinite;
+}
+@keyframes skeleton-shift { to { background-position-x: -220%; } }
+.table-message {
+  text-align: center;
+  color: var(--text-secondary);
+  padding: 28px !important;
+}
+.load-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 24px;
+  color: var(--text-secondary);
+  background: var(--bg-card);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  font-size: 0.87rem;
+}
+.load-error .btn-ghost { white-space: nowrap; }
+#chartError:not(:empty) { margin-top: 12px; }
+
+@media (max-width: 768px) {
+  .header-inner { gap: 8px 12px; padding: 9px 16px 10px; }
+  .nav {
+    justify-content: flex-start;
+    gap: 2px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .nav::-webkit-scrollbar { display: none; }
+  .nav-link { flex: 0 0 auto; white-space: nowrap; }
+  .search-wrapper { order: 3; }
+  .nav { order: 4; }
+  .live-indicator span:last-child { display: inline; }
+  .live-indicator { font-size: 0.66rem; letter-spacing: 0.02em; }
+  .last-update { display: none; }
+  main section[id] { scroll-margin-top: 155px; }
+  .session-inner { gap: 16px; }
+  .session-indices {
+    display: flex;
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+  }
+  .session-indices::-webkit-scrollbar { display: none; }
+  .session-index {
+    flex: 0 0 215px;
+    min-height: 118px;
+    scroll-snap-align: start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-card { animation: none; }
+}
+
+.data-meta {
+  margin: 0 0 18px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  line-height: 1.5;
+  letter-spacing: 0.01em;
+}
+.data-meta.is-mock { color: var(--ref); }
+.data-meta + .market-cards { margin-top: 0; }
+.data-meta + .table-container { margin-top: 0; }
+.signal-warning, .pick-warning {
+  display: block;
+  margin-top: 9px;
+  color: var(--ref);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+.analysis-details {
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+  padding-top: 11px;
+}
+.analysis-details summary {
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.76rem;
+  font-weight: 600;
+  list-style-position: inside;
+}
+.analysis-details summary:hover { color: var(--text-primary); }
+.analysis-details[open] summary { margin-bottom: 14px; }
+.section-track-record {
+  background: var(--bg-secondary);
+  border-block: 1px solid var(--line);
+}
+.track-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  margin-top: 24px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.track-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 22px;
+  background: var(--bg-card);
+}
+.track-stat span { color: var(--text-secondary); font-size: 0.8rem; }
+.track-stat strong { font: 600 1.6rem var(--font-mono); font-variant-numeric: tabular-nums; }
+.track-stat small { color: var(--text-muted); font-size: 0.72rem; }
+.track-table-wrap { overflow-x: auto; margin-top: 18px; }
+.track-table-wrap .stock-table { min-width: 480px; }
+.track-empty, .track-method {
+  margin-top: 18px;
+  max-width: 75ch;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  line-height: 1.6;
+}
+@media (max-width: 640px) {
+  .track-stats { grid-template-columns: 1fr; }
+  .track-stat { padding: 15px 18px; }
 }

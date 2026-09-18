@@ -12,6 +12,7 @@
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📈</text></svg>" />
 </head>
 <body>
+  <a class="skip-link" href="#mainContent">Bỏ qua điều hướng</a>
   <div id="app">
     <!-- Header -->
     <header class="header" id="header">
@@ -35,7 +36,7 @@
           <div class="search-results" id="searchResults"></div>
         </div>
 
-        <nav class="nav">
+        <nav class="nav" aria-label="Điều hướng chính">
           <a href="#picks" class="nav-link active" data-section="picks">Top 10</a>
           <a href="#market" class="nav-link" data-section="market">Thị Trường</a>
           <a href="#agentCouncilSection" class="nav-link" data-section="council">Hội Đồng AI</a>
@@ -46,9 +47,9 @@
           <div class="data-source-badge" id="dataSourceBadge" style="display: none;" title="Một hoặc nhiều nguồn dữ liệu đang dùng dữ liệu mẫu/giả lập (không phải giá thị trường thực), do backend không lấy được dữ liệu thật.">
             ⚠️ DỮ LIỆU MẪU
           </div>
-          <div class="live-indicator">
+          <div class="live-indicator" id="marketStatus" aria-live="polite">
             <span class="live-dot"></span>
-            <span>LIVE</span>
+            <span>Đang kết nối</span>
           </div>
           <div class="last-update" id="lastUpdate">Đang tải...</div>
           <a href="/api/auth/logout" class="logout-link" id="logoutLink" title="Đăng xuất" hidden>⎋ Đăng xuất</a>
@@ -56,6 +57,7 @@
       </div>
     </header>
 
+    <main id="mainContent">
     <!-- Watchlist Section -->
     <section class="watchlist-section" id="watchlistSection" style="display: none;">
       <div class="container">
@@ -90,9 +92,21 @@
             <button class="btn-ghost" id="picksRefresh" type="button">Chốt lại danh sách</button>
           </div>
         </div>
+        <p class="data-meta" id="picksProvenance">Đang kiểm tra nguồn bảng giá và tín hiệu…</p>
         <div class="picks-board" id="picksBoard">
           <div class="detail-loading"><div class="spinner small"></div></div>
         </div>
+      </div>
+    </section>
+
+    <section class="section section-track-record" id="trackRecord">
+      <div class="container">
+        <div class="section-heading">
+          <span class="eyebrow">Kiểm chứng</span>
+          <h2 class="section-title">Khuyến nghị đã diễn biến ra sao?</h2>
+          <p class="section-lede">Theo dõi các mã được gắn nhãn MUA từ bản chốt đầu tiên của mỗi ngày.</p>
+        </div>
+        <div id="trackRecordContent" aria-live="polite"><p class="track-empty">Đang tải lịch sử đã lưu…</p></div>
       </div>
     </section>
 
@@ -103,8 +117,11 @@
           <span class="eyebrow">Toàn cảnh</span>
           <h2 class="section-title">Thị trường hôm nay</h2>
         </div>
+        <p class="data-meta" id="marketProvenance">Đang kiểm tra nguồn chỉ số…</p>
         <div class="market-cards" id="marketCards">
-          <!-- Cards injected by JS -->
+          <div class="skeleton-card" aria-label="Đang tải chỉ số thị trường"></div>
+          <div class="skeleton-card" aria-hidden="true"></div>
+          <div class="skeleton-card" aria-hidden="true"></div>
         </div>
 
         <!-- Heatmap -->
@@ -122,6 +139,7 @@
           <span class="eyebrow">Dòng tin</span>
           <h2 class="section-title">Tin tức &amp; tâm lý thị trường</h2>
         </div>
+        <p class="data-meta" id="newsProvenance">Đang kiểm tra nguồn bản tin…</p>
         <div id="newsContent">
           <div class="detail-loading"><div class="spinner small"></div></div>
         </div>
@@ -143,6 +161,7 @@
             <button class="tab" data-tab="top-losers">Top Giảm</button>
           </div>
         </div>
+        <p class="data-meta" id="stocksProvenance">Đang kiểm tra nguồn bảng giá…</p>
         <div class="table-container">
           <table class="stock-table" id="stockTable">
             <thead>
@@ -158,8 +177,7 @@
                 <th>Thấp Nhất</th>
               </tr>
             </thead>
-            <tbody id="stockTableBody">
-            </tbody>
+            <tbody id="stockTableBody"><tr><td colspan="9" class="table-message">Đang tải bảng giá…</td></tr></tbody>
           </table>
         </div>
       </div>
@@ -182,6 +200,7 @@
             <button class="tab" data-tab="combined">Tổng Hợp</button>
           </div>
         </div>
+        <p class="data-meta" id="suggestionsProvenance">Điểm tổng hợp dùng kỹ thuật, cơ bản và tin tức; cảnh báo có thể giới hạn kết luận MUA.</p>
 
         <!-- Short Term -->
         <div class="suggestion-tab-content active" id="tab-short-term">
@@ -282,17 +301,20 @@
             <button class="ind-btn" id="toggleRSI">RSI Panel</button>
           </div>
         </div>
+        <p class="data-meta" id="chartProvenance">Đang kiểm tra nguồn dữ liệu biểu đồ…</p>
 
         <!-- Charts -->
         <div class="chart-wrapper">
           <div id="chartContainer" class="chart-container"></div>
         </div>
+        <div id="chartError"></div>
         <div class="chart-wrapper rsi-wrapper" id="rsiWrapper">
           <div id="rsiContainer" class="chart-container" style="height: 120px;"></div>
         </div>
       </div>
     </section>
 
+    </main>
     <!-- Footer -->
     <footer class="footer">
       <div class="container">
@@ -306,14 +328,6 @@
         </div>
       </div>
     </footer>
-  </div>
-
-  <!-- Loading Overlay -->
-  <div class="loading-overlay" id="loadingOverlay">
-    <div class="loading-spinner">
-      <div class="spinner"></div>
-      <p>Hệ thống đang tổng hợp dữ liệu & phân tích AI...</p>
-    </div>
   </div>
 
   <script type="module" src="/src/main.ts"></script>

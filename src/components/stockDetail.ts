@@ -9,6 +9,7 @@ import { analyzeShortTerm } from '../analysis/technicalAnalysis';
 import { analyzeLongTerm } from '../analysis/fundamentalAnalysis';
 import { analyzeNewsSentiment } from '../analysis/newsAnalysis';
 import { analyzePriceZones } from '../analysis/priceZoneAnalysis';
+import { getCurrentRecommendation, scoreRecommendation } from '../analysis/recommendation';
 import { fetchStockBars, fetchFinancialData, fetchTickerNews } from '../api/stockApi';
 
 let isOpen = false;
@@ -110,10 +111,9 @@ function renderDetailContent(
   const pctChange = prevBar.close > 0 ? (change / prevBar.close * 100) : 0;
   const changeClass = change >= 0 ? 'positive' : 'negative';
 
-  // Combined score
-  const techScore = tech.strength;
-  const fundScore = fund?.score ?? 50;
-  const combinedScore = Math.round(techScore * 0.4 + fundScore * 0.6);
+  // The same decision rules used by the board and allocator.
+  const verdict = getCurrentRecommendation(_ticker) ?? scoreRecommendation(tech, fund, news);
+  const combinedScore = verdict.score;
 
   // Risk/Reward from metrics
   const rrRatio = tech.metrics['R/R'] || 0;
@@ -130,14 +130,10 @@ function renderDetailContent(
 
   // Overall AI recommendation
   let aiRecommendation = '';
-  if (combinedScore >= 75) {
+  if (verdict.decision === 'BUY') {
     aiRecommendation = '✅ AI đánh giá rất tích cực. Cổ phiếu có tiềm năng tăng trưởng cao với nền tảng cơ bản vững chắc.';
-  } else if (combinedScore >= 65) {
-    aiRecommendation = '🟢 AI đánh giá tích cực. Cổ phiếu đáng cân nhắc đầu tư, lưu ý quản trị rủi ro.';
-  } else if (combinedScore >= 50) {
-    aiRecommendation = '🟡 AI đánh giá trung tính. Cần thêm tín hiệu xác nhận trước khi quyết định.';
-  } else if (combinedScore >= 35) {
-    aiRecommendation = '🟠 AI đánh giá thận trọng. Rủi ro đang cao hơn cơ hội, nên chờ thêm.';
+  } else if (verdict.decision === 'HOLD') {
+    aiRecommendation = '🟡 Theo dõi và chờ tín hiệu rõ ràng hơn trước khi mở vị thế.';
   } else {
     aiRecommendation = '🔴 AI đánh giá tiêu cực. Nên tránh mở vị thế mới, cân nhắc cắt lỗ nếu đang nắm giữ.';
   }
@@ -159,8 +155,10 @@ function renderDetailContent(
     </div>
 
     <!-- AI Recommendation Banner -->
-    <div class="detail-ai-recommendation ${combinedScore >= 65 ? 'ai-positive' : combinedScore <= 35 ? 'ai-negative' : 'ai-neutral'}">
+    <div class="detail-ai-recommendation ${verdict.decision === 'BUY' ? 'ai-positive' : verdict.decision === 'SELL' ? 'ai-negative' : 'ai-neutral'}">
       <div class="ai-rec-text">${aiRecommendation}</div>
+      ${getCurrentRecommendation(_ticker) ? '<div class="data-meta">Kết luận từ bảng phân tích gần nhất</div>' : ''}
+      ${verdict.warnings.length ? `<div class="signal-warning">Lưu ý: ${verdict.warnings.join(' · ')}</div>` : ''}
       ${fund ? `<div class="ai-rec-meta">${investTypeEmoji} | ${fund.holdingPeriod} | Đồng thuận: ${consensus}%</div>` : ''}
     </div>
 

@@ -35,6 +35,7 @@ def _get_market_overview_bars(fetch) -> list:
             pct = (change / prev_close * 100) if prev_close else 0
             results.append({
                 "ticker": "UPINDEX" if symbol == "UPCOMINDEX" else symbol, "name": name,
+                "tradingDate": last.get('tradingDate', ''),
                 "close": round(close, 2), "change": round(change, 2), "pctChange": round(pct, 2),
                 "volume": last['volume'], "advances": 0, "declines": 0, "unchanged": 0,
             })
@@ -76,6 +77,7 @@ def get_market_overview() -> dict:
             ch = cp - rp if rp else 0
             pct = (ch / rp * 100) if rp else 0
             results.append({"ticker": t, "name": name_map.get(t, t),
+                "tradingDate": item.get("tradingDate", item.get("date", "")),
                 "close": round(cp, 2), "change": round(ch, 2), "pctChange": round(pct, 2),
                 "volume": item.get("volume", 0), "advances": item.get("advances", 0),
                 "declines": item.get("declines", 0), "unchanged": item.get("unchanged", 0)})

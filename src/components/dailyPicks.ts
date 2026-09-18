@@ -8,8 +8,9 @@
 import type { CombinedSignal } from './suggestions';
 import { sessionPhase } from './sessionBand';
 import { openStockDetail } from './stockDetail';
+import { recordPickSnapshot, refreshTrackRecord } from './trackRecord';
 
-const SNAPSHOT_KEY = 'traderai_daily_picks_v2'; // v2: trade-plan levels were clamped
+const SNAPSHOT_KEY = 'traderai_daily_picks_v3';
 const PICK_COUNT = 10;
 
 export interface PickMeta {
@@ -22,7 +23,7 @@ export interface PickMeta {
   rvol?: number;
 }
 
-interface Pick {
+export interface Pick {
   ticker: string;
   name: string;
   exchange: string;
@@ -36,16 +37,19 @@ interface Pick {
   target: number;
   stop: number;
   rvol: number;
+  warnings: string[];
 }
 
-interface Snapshot {
+export interface Snapshot {
   tradingDay: string;
   stampedAt: string;
+  verified: boolean;
   picks: Pick[];
 }
 
 let latestSignals: CombinedSignal[] = [];
 let latestMeta = new Map<string, PickMeta>();
+let latestTrusted = false;
 
 /** The exchange's calendar day, so a snapshot taken at 09:16 survives until the next session. */
 function tradingDay(now = new Date()): string {
@@ -115,9 +119,7 @@ function buildWhy(signal: CombinedSignal, meta: PickMeta): string {
 function buildPicks(signals: CombinedSignal[], meta: Map<string, PickMeta>): Pick[] {
   // A "mã tiềm năng" list with SELL verdicts on it contradicts itself; keep the
   // ranking but drop outright sells, falling back only if too few remain.
-  const eligible = signals.filter(s => s.techSignal.signal !== 'SELL');
-  const sells = signals.filter(s => s.techSignal.signal === 'SELL');
-  const pool = [...eligible, ...sells];
+  const pool = signals.filter(s => s.decision !== 'SELL');
   return pool.slice(0, PICK_COUNT).map(s => {
     const m = meta.get(s.ticker) ?? {};
     const price = m.close ?? s.techSignal.entryPrice ?? 0;
@@ -130,7 +132,8 @@ function buildPicks(signals: CombinedSignal[], meta: Map<string, PickMeta>): Pic
       pctChange: pct,
       priceState: priceState(price, pct, m),
       score: s.combinedScore,
-      signal: s.techSignal.signal,
+      signal: s.decision,
+      warnings: s.warnings,
       why: buildWhy(s, m),
       entry: s.techSignal.entryPrice || s.techSignal.supportLevel,
       target: s.techSignal.targetPrice,
@@ -168,7 +171,7 @@ function render(snap: Snapshot) {
       <span>Kế hoạch</span>
       <span></span>
     </div>
-    ${snap.picks.map((p, i) => {
+    ${snap.picks.length ? snap.picks.map((p, i) => {
       const signalClass = p.signal === 'BUY' ? 'buy' : p.signal === 'SELL' ? 'sell' : 'hold';
       const signalText = p.signal === 'BUY' ? 'MUA' : p.signal === 'SELL' ? 'BÁN' : 'QUAN SÁT';
       const sign = p.pctChange > 0 ? '+' : '';
@@ -190,7 +193,7 @@ function render(snap: Snapshot) {
           <span class="pick-score-value">${p.score}<small>/100</small></span>
           <span class="pick-score-bar"><i style="width:${Math.max(4, Math.min(100, p.score))}%"></i></span>
         </div>
-        <p class="pick-why">${escapeHtml(p.why)}</p>
+        <p class="pick-why">${escapeHtml(p.why)}${p.warnings?.length ? `<span class="pick-warning">Lưu ý: ${escapeHtml(p.warnings[0])}</span>` : ''}</p>
         <div class="pick-plan">
           <span>Gom quanh ${num(p.entry)}</span>
           <span class="plan-target">Mục tiêu ${num(p.target)}</span>
@@ -201,7 +204,7 @@ function render(snap: Snapshot) {
           <button class="pick-council" data-council="${escapeHtml(p.ticker)}" type="button">Hội đồng AI</button>
         </div>
       </div>`;
-    }).join('')}
+    }).join('') : '<p class="track-empty">Chưa có mã nào đủ điều kiện theo dõi trong phiên này.</p>'}
   `;
 
   board.querySelectorAll<HTMLButtonElement>('[data-council]').forEach(btn => {
@@ -216,13 +219,16 @@ function render(snap: Snapshot) {
 }
 
 /** Called once the suggestion engine has scored today's universe. */
-export function setDailyPicks(signals: CombinedSignal[], meta: Map<string, PickMeta>) {
+export function setDailyPicks(signals: CombinedSignal[], meta: Map<string, PickMeta>, trusted = false) {
   latestSignals = signals;
   latestMeta = meta;
+  latestTrusted = trusted;
 
   const existing = readSnapshot();
-  if (existing) {
+  if (existing && (existing.verified || !trusted)) {
     render(existing);
+    if (existing.verified) recordPickSnapshot(existing);
+    void refreshTrackRecord();
     return;
   }
   freezeNow();
@@ -233,10 +239,13 @@ function freezeNow() {
   const snap: Snapshot = {
     tradingDay: tradingDay(),
     stampedAt: new Date().toISOString(),
+    verified: latestTrusted,
     picks: buildPicks(latestSignals, latestMeta),
   };
   writeSnapshot(snap);
+  if (latestTrusted) recordPickSnapshot(snap);
   render(snap);
+  void refreshTrackRecord();
 }
 
 export function initDailyPicks() {

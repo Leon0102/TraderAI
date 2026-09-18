@@ -2,7 +2,7 @@
 // Vietnamese Stock Market Dashboard with Real-time Data & Investment Suggestions
 
 import './style.css';
-import { fetchMarketOverview, fetchTopStocks, fetchStockBars, fetchMultipleFinancials, fetchMarketAnalysis, fetchMarketNews, fetchMultipleTickerNews, isAnyDataMock, withLiveBar } from './api/stockApi';
+import { fetchMarketOverview, fetchTopStocks, fetchStockBars, fetchMultipleFinancials, fetchMarketAnalysis, fetchMarketNews, fetchMultipleTickerNews, getFeedProvenance, isAnyDataMock, withLiveBar } from './api/stockApi';
 import { renderMarketCards } from './components/marketOverview';
 import { renderSessionBand } from './components/sessionBand';
 import { initDailyPicks, setDailyPicks } from './components/dailyPicks';
@@ -20,6 +20,8 @@ import { renderWatchlist } from './components/watchlist';
 import { renderHeatmap } from './components/heatmap';
 import { renderNewsFeed } from './components/newsFeed';
 import { initAgentCouncil, openCouncilForTicker } from './components/agentCouncil';
+import { renderFeedMeta } from './components/provenance';
+import { setCurrentRecommendations } from './analysis/recommendation';
 
 declare global {
   interface Window {
@@ -34,8 +36,26 @@ let currentChartSymbol = 'FPT';
 let currentResolution = 'D';
 let stocksData: any[] = [];
 let refreshInterval: number | null = null;
+let marketOverviewConnected = false;
 // Expose market cache for potential use by other modules
 export const marketDataCache: { data: any[]; ctx: ReturnType<typeof analyzeMarket> | null } = { data: [], ctx: null };
+
+function showLoadError(id: string, message: string, retry: () => void) {
+  const container = document.getElementById(id);
+  if (!container) return;
+  const content = `<div class="load-error" role="alert"><span>${message}</span><button type="button" class="btn-ghost">Thử lại</button></div>`;
+  container.innerHTML = container.tagName === 'TBODY' ? `<tr><td colspan="9">${content}</td></tr>` : content;
+  container.querySelector('button')?.addEventListener('click', retry);
+}
+
+function updateMarketStatus(connected: boolean) {
+  const status = document.getElementById('marketStatus');
+  if (!status) return;
+  const isMock = connected && isAnyDataMock();
+  status.classList.toggle('is-unavailable', !connected || isMock);
+  const label = status.querySelector('span:last-child');
+  if (label) label.textContent = !connected ? 'Mất kết nối' : isMock ? 'Dữ liệu mẫu' : 'Đã cập nhật';
+}
 
 // ===========================
 // Core Functions
@@ -55,8 +75,15 @@ async function loadMarketOverview() {
 
     renderMarketCards(data, marketCtx);
     renderSessionBand(data, marketCtx);
+    renderFeedMeta('marketProvenance', 'market', 'Chỉ số', analysisData?.source !== 'mock' ? analysisData?.vnindexHistory?.at(-1)?.tradingDate : undefined);
+    marketOverviewConnected = true;
+    updateLastTime();
+    updateDataSourceBadge();
   } catch (e) {
     console.error('Market overview error:', e);
+    marketOverviewConnected = false;
+    showLoadError('marketCards', 'Không tải được chỉ số thị trường.', () => void loadMarketOverview());
+    updateMarketStatus(false);
   }
 }
 
@@ -65,8 +92,10 @@ async function loadStockTable() {
     const stocks = await fetchTopStocks(30);
     stocksData = stocks;
     renderStockTable(stocks);
+    renderFeedMeta('stocksProvenance', 'stocks', 'Bảng giá');
   } catch (e) {
     console.error('Stock table error:', e);
+    showLoadError('stockTableBody', 'Không tải được bảng giá.', () => void loadStockTable());
   }
 }
 
@@ -80,9 +109,12 @@ async function loadChart(symbol?: string, resolution?: string) {
     // Load more bars for better indicator calculation
     const bars = await fetchStockBars(ticker, res, 200);
     updateChartData(bars);
+    renderFeedMeta('chartProvenance', `history:${ticker}`, `Lịch sử giá ${ticker}`);
+    document.getElementById('chartError')?.replaceChildren();
     updateDataSourceBadge();
   } catch (e) {
     console.error('Chart error:', e);
+    showLoadError('chartError', `Không tải được biểu đồ ${currentChartSymbol}.`, () => void loadChart());
   }
 }
 
@@ -130,10 +162,11 @@ async function loadSuggestions() {
     }
     setNewsSignals(newsSignalMap);
 
-    renderShortTermSuggestions(techSignals);
-    renderLongTermSuggestions(fundSignals);
-    renderCombinedSuggestions(techSignals, fundSignals);
     const combined = getCombinedSignals(techSignals, fundSignals);
+    setCurrentRecommendations(combined);
+    renderShortTermSuggestions(techSignals, combined);
+    renderLongTermSuggestions(fundSignals, combined);
+    renderCombinedSuggestions(techSignals, fundSignals);
     setAllocatorSignals(combined);
 
     const pickMeta = new Map<string, PickMeta>(topStocks.map((s: any) => [s.ticker, {
@@ -145,10 +178,23 @@ async function loadSuggestions() {
       floor: s.floor,
       rvol: s.rvol,
     }]));
-    setDailyPicks(combined, pickMeta);
+    setDailyPicks(combined, pickMeta, !isAnyDataMock());
+    renderFeedMeta('picksProvenance', 'stocks', 'Bảng giá đầu vào');
+    const analysisMeta = document.getElementById('suggestionsProvenance');
+    if (analysisMeta) {
+      const source = (key: string) => {
+        const feed = getFeedProvenance(key);
+        return feed ? (feed.isMock ? 'MẪU' : feed.source.toUpperCase()) : 'chưa rõ';
+      };
+      analysisMeta.textContent = `Phân tích ${tickers.length} mã · bảng giá ${source('stocks')} · lịch sử ${source('history')} · tài chính ${source('finance')} · tin ${source('news')} · nhận ${new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Ho_Chi_Minh' })}${isAnyDataMock() ? ' · CÓ NGUỒN MẪU' : ''}`;
+      analysisMeta.classList.toggle('is-mock', isAnyDataMock());
+    }
     updateChartRecommendedOptgroup(combined);
   } catch (e) {
     console.error('Suggestions error:', e);
+    showLoadError('shortTermCards', 'Chưa tải được tín hiệu phân tích.', () => void loadSuggestions());
+    showLoadError('longTermCards', 'Chưa tải được tín hiệu phân tích.', () => void loadSuggestions());
+    showLoadError('combinedCards', 'Chưa tải được tín hiệu phân tích.', () => void loadSuggestions());
   }
 }
 
@@ -158,7 +204,7 @@ function updateChartRecommendedOptgroup(combined: ReturnType<typeof getCombinedS
   const select = document.getElementById('chartSymbol') as HTMLSelectElement | null;
   if (!select) return;
 
-  const top = combined.filter(c => c.combinedScore >= 60).slice(0, 6);
+  const top = combined.filter(c => c.decision === 'BUY').slice(0, 6);
   if (top.length === 0) return;
 
   let group = select.querySelector('optgroup[data-recommended]') as HTMLOptGroupElement | null;
@@ -176,9 +222,11 @@ async function loadNewsFeed() {
     const newsData = await fetchMarketNews();
     if (newsData) {
       renderNewsFeed(newsData.articles, newsData.sentiment);
+      renderFeedMeta('newsProvenance', 'marketNews', 'Bản tin mới nhất');
     }
   } catch (e) {
     console.error('News feed error:', e);
+    showLoadError('newsContent', 'Không tải được tin tức.', () => void loadNewsFeed());
   }
 }
 
@@ -194,10 +242,10 @@ function updateDataSourceBadge() {
   const badge = document.getElementById('dataSourceBadge');
   if (!badge) return;
   badge.style.display = isAnyDataMock() ? 'flex' : 'none';
+  if (marketOverviewConnected) updateMarketStatus(true);
 }
 
 async function refreshAll() {
-  updateLastTime();
   await Promise.all([
     loadMarketOverview(),
     loadStockTable(),
@@ -212,8 +260,6 @@ async function refreshAll() {
 // ===========================
 
 async function init() {
-  const loadingOverlay = document.getElementById('loadingOverlay');
-
   // Init UI components
   initSearchBar();
   initStockTable();
@@ -272,7 +318,7 @@ async function init() {
     }
   });
 
-  // Mobile nav logic is simplified for now
+  // Keep the current section visible in the navigation while scrolling.
   const navLinks = document.querySelectorAll('.nav-link');
   navLinks.forEach(link => {
     link.addEventListener('click', () => {
@@ -280,6 +326,20 @@ async function init() {
       link.classList.add('active');
     });
   });
+  const sections = [...navLinks]
+    .map(link => document.querySelector((link as HTMLAnchorElement).hash))
+    .filter((section): section is Element => section !== null);
+  const sectionObserver = new IntersectionObserver(entries => {
+    const visible = entries.filter(entry => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+    if (!visible) return;
+    navLinks.forEach(link => {
+      const active = (link as HTMLAnchorElement).hash === `#${visible.target.id}`;
+      link.classList.toggle('active', active);
+      if (active) link.setAttribute('aria-current', 'location');
+      else link.removeAttribute('aria-current');
+    });
+  }, { rootMargin: '-20% 0px -65% 0px', threshold: 0 });
+  sections.forEach(section => sectionObserver.observe(section));
 
   // Load initial data in two waves. Firing all ~7 loaders (suggestions alone
   // fans out to 20 tickers x 3 endpoints) in a single Promise.all sends 60+
@@ -299,14 +359,7 @@ async function init() {
     console.error('Init error (wave 1):', e);
   }
 
-  updateLastTime();
   updateDataSourceBadge();
-
-  // Hide loading
-  if (loadingOverlay) {
-    loadingOverlay.classList.add('hidden');
-    setTimeout(() => loadingOverlay.remove(), 500);
-  }
 
   try {
     await Promise.all([
