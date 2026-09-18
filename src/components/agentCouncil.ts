@@ -533,6 +533,29 @@ function calculateBullBearScore(v: AgentCouncilVerdict): { bullPct: number; bear
   return { bullPct, bearPct, statusText };
 }
 
+function calculateRR(v: AgentCouncilVerdict): string | null {
+  try {
+    const parseNum = (str: string) => {
+      const match = str.replace(/,/g, '').match(/\d+(\.\d+)?/);
+      return match ? parseFloat(match[0]) : null;
+    };
+    const target = parseNum(v.target_price);
+    const stop = parseNum(v.stop_loss);
+    const entry = parseNum(v.entry_zone);
+    if (target && stop && entry && target > entry && entry > stop) {
+      const reward = target - entry;
+      const risk = entry - stop;
+      if (risk > 0) {
+        const ratio = (reward / risk).toFixed(1);
+        return `1 : ${ratio}`;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
 function buildVerdictCard(v: AgentCouncilVerdict, raw: string, engine?: string): HTMLElement {
   const card = document.createElement('div');
   card.className = 'verdict-card fade-in';
@@ -540,6 +563,7 @@ function buildVerdictCard(v: AgentCouncilVerdict, raw: string, engine?: string):
   const actionClass = v.action === 'MUA' ? 'action-buy' : v.action === 'BÁN' ? 'action-sell' : 'action-hold';
 
   const { bullPct, bearPct, statusText } = calculateBullBearScore(v);
+  const rrRatio = calculateRR(v);
 
   card.innerHTML = `
     <div class="verdict-header">
@@ -547,7 +571,12 @@ function buildVerdictCard(v: AgentCouncilVerdict, raw: string, engine?: string):
         <span class="verdict-badge">👔 PHÁN QUYẾT HỘI ĐỒNG ĐẦU TƯ${engine ? ` · ${escapeHtml(engine)}` : ''}</span>
         <h3 class="verdict-title">Quyết định Quản lý Quỹ & Quản trị Rủi ro (T+2.5)</h3>
       </div>
-      <div class="verdict-action-tag ${actionClass}">${escapeHtml(v.action)}</div>
+      <div class="verdict-header-actions">
+        <button class="btn-copy-verdict" id="btnCopyVerdict" type="button" title="Sao chép tóm tắt khuyến nghị">
+          📋 Sao chép
+        </button>
+        <div class="verdict-action-tag ${actionClass}">${escapeHtml(v.action)}</div>
+      </div>
     </div>
 
     <!-- Bull vs Bear Power Gauge -->
@@ -573,12 +602,13 @@ function buildVerdictCard(v: AgentCouncilVerdict, raw: string, engine?: string):
         <span class="metric-val text-blue">${escapeHtml(v.target_price)}</span>
       </div>
       <div class="verdict-metric">
-        <span class="metric-label">🛑 Cắt Lỗ (Kỷ luật)</span>
+        <span class="metric-label">🛑 Cắt Lỗ (Kỷ luật T+2.5)</span>
         <span class="metric-val text-red">${escapeHtml(v.stop_loss)}</span>
       </div>
       <div class="verdict-metric">
         <span class="metric-label">⚖️ Tỷ Trọng Danh Mục</span>
         <span class="metric-val">${escapeHtml(v.sizing)}</span>
+        ${rrRatio ? `<span class="rr-ratio-pill" title="Tỷ lệ Lợi nhuận / Rủi ro">R/R = ${rrRatio}</span>` : ''}
       </div>
     </div>
 
@@ -588,6 +618,28 @@ function buildVerdictCard(v: AgentCouncilVerdict, raw: string, engine?: string):
     </div>
     <p class="council-disclaimer">Phân tích tự động mang tính tham khảo, không phải khuyến nghị đầu tư.</p>
   `;
+
+  // Attach copy handler
+  const copyBtn = card.querySelector<HTMLButtonElement>('#btnCopyVerdict');
+  copyBtn?.addEventListener('click', async () => {
+    const textToCopy = `🏛️ PHÁN QUYẾT HỘI ĐỒNG AI - ${currentCouncilTicker}\n` +
+      `• Khuyến nghị: ${v.action}\n` +
+      `• Vùng giá gom: ${v.entry_zone}\n` +
+      `• Giá mục tiêu: ${v.target_price}\n` +
+      `• Điểm cắt lỗ: ${v.stop_loss}\n` +
+      `• Tỷ trọng: ${v.sizing}\n` +
+      `• Rủi ro: ${v.risk_level}\n` +
+      `• Tóm tắt: ${v.summary || raw}\n` +
+      `Nguồn: TraderAI (Tauric TradingAgents Architecture • Chuẩn TTCK VN)`;
+    try {
+      await navigator.clipboard.writeText(textToCopy);
+      copyBtn.textContent = '✓ Đã sao chép!';
+      setTimeout(() => { copyBtn.textContent = '📋 Sao chép'; }, 2000);
+    } catch {
+      /* ignore clipboard rejection */
+    }
+  });
+
   return card;
 }
 

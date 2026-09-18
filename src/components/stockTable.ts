@@ -57,7 +57,12 @@ export function renderStockTable(stocks: any[]) {
 
     return `
       <tr class="stock-row" data-ticker="${stock.ticker}">
-        <td><span class="stock-symbol">${stock.ticker}</span></td>
+        <td>
+          <div style="display: inline-flex; align-items: center; gap: 8px;">
+            <span class="stock-symbol">${stock.ticker}</span>
+            <button class="row-ai-btn" data-council="${stock.ticker}" title="Hội đồng AI phân tích ${stock.ticker}">🤖</button>
+          </div>
+        </td>
         <td class="${direction}">${formatPrice(stock.close)}</td>
         <td class="${direction}">${sign}${formatPrice(change)}</td>
         <td class="${direction}">${sign}${pctChange.toFixed(2)}%</td>
@@ -72,9 +77,20 @@ export function renderStockTable(stocks: any[]) {
 
   tbody.innerHTML = rows;
 
-  // Add click handler for stock rows
+  // Add click handler for stock rows and AI button
+  tbody.querySelectorAll('.row-ai-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const ticker = (btn as HTMLElement).dataset.council;
+      if (ticker && window.openCouncilForTicker) {
+        window.openCouncilForTicker(ticker);
+      }
+    });
+  });
+
   tbody.querySelectorAll('.stock-row').forEach(row => {
-    row.addEventListener('click', () => {
+    row.addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).closest('.row-ai-btn')) return;
       const ticker = (row as HTMLElement).dataset.ticker;
       if (ticker) {
         const select = document.getElementById('chartSymbol') as HTMLSelectElement;
