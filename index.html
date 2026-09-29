@@ -121,6 +121,40 @@
           </div>
           <button class="btn-ghost" id="portfolioExport" type="button">Xuất CSV</button>
         </div>
+        <div class="tcbs-panel" id="tcbsPanel">
+          <div class="tcbs-head">
+            <div>
+              <strong>Tài khoản TCBS</strong>
+              <span class="tcbs-badge">Chỉ đọc · chạy local</span>
+              <p class="tcbs-status" id="tcbsStatus" aria-live="polite">Đang kiểm tra kết nối…</p>
+            </div>
+            <div class="tcbs-actions">
+              <form id="tcbsLoginForm" class="tcbs-login" hidden>
+                <input id="tcbsOtp" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="Mã OTP" aria-label="Mã OTP TCBS">
+                <button class="btn-ghost" type="submit">Đăng nhập</button>
+              </form>
+              <button class="btn-ghost" id="tcbsSync" type="button" hidden>Đồng bộ</button>
+              <button class="btn-ghost" id="tcbsImport" type="button" hidden>Chép vào danh mục ảo</button>
+              <button class="btn-ghost" id="tcbsReview" type="button" hidden>AI đánh giá danh mục</button>
+            </div>
+          </div>
+          <dialog id="tcbsOtpDialog" class="tcbs-dialog" aria-labelledby="tcbsOtpDialogTitle">
+          <form id="tcbsOtpDialogForm">
+            <h3 id="tcbsOtpDialogTitle">Đăng nhập TCBS</h3>
+            <p>Nhập mã OTP từ app TCBS để tải danh mục thật. Token dùng được tối đa 8 giờ; TCBS giới hạn 10 lần đăng nhập mỗi ngày.</p>
+            <input id="tcbsOtpDialogInput" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="Mã OTP" aria-label="Mã OTP TCBS" required>
+            <p class="tcbs-dialog-error negative" id="tcbsOtpDialogError" aria-live="polite"></p>
+            <div class="tcbs-dialog-actions">
+              <button class="btn-ghost" id="tcbsOtpDialogLater" type="button">Để sau</button>
+              <button class="btn-ghost tcbs-dialog-submit" id="tcbsOtpDialogSubmit" type="submit">Đăng nhập</button>
+            </div>
+          </form>
+        </dialog>
+        <div id="tcbsContent"></div>
+          <div id="tcbsPlan" class="tcbs-plan" hidden></div>
+        <div id="tcbsInsights" class="tcbs-plan" hidden></div>
+        <div id="tcbsReviewOut" class="tcbs-review" hidden></div>
+        </div>
         <div class="portfolio-grid">
           <form class="portfolio-form" id="portfolioForm">
             <div class="form-row">

@@ -169,6 +169,13 @@ def price_board(symbols: list) -> list:
     return results
 
 
+def company_info(symbol: str) -> Optional[dict]:
+    """Company profile: ICB sector, analyst rating/target price, dividend per share."""
+    data = _vci_get(f"{IQ_URL}/v1/company/{symbol}", ttl=3600)
+    info = (data or {}).get("data")
+    return info if isinstance(info, dict) else None
+
+
 def financial_ratio(symbol: str) -> Optional[dict]:
     """Latest trailing-twelve-month financial ratios (P/E, P/B, ROE, D/E, ...) for a ticker."""
     data = _vci_get(f"{IQ_URL}/v1/company/{symbol}/statistics-financial", ttl=300)

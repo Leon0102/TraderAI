@@ -106,13 +106,13 @@ import json  # noqa: E402
 
 from fastapi import HTTPException  # noqa: E402
 from fastapi.responses import StreamingResponse  # noqa: E402
-from pydantic import BaseModel  # noqa: E402
+from pydantic import BaseModel, Field  # noqa: E402
 
 
 def _load_env_files():
-    """Minimal .env loader (backend/.env, then project .env) so GEMINI_API_KEY / OPENAI_API_KEY work locally."""
+    """Minimal .env loader (backend/.env, project .env, then .env.local) so GEMINI_API_KEY / OPENAI_API_KEY work locally."""
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    for path in (os.path.join(root, 'backend', '.env'), os.path.join(root, '.env')):
+    for path in (os.path.join(root, 'backend', '.env'), os.path.join(root, '.env'), os.path.join(root, '.env.local')):
         if not os.path.isfile(path):
             continue
         with open(path, encoding='utf-8') as f:
@@ -182,6 +182,148 @@ def api_agents_stream(req: AgentAnalyzeRequest):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# ==========================================
+# TCBS account (read-only, local machine only)
+# ==========================================
+from urllib.parse import urlparse  # noqa: E402
+
+from fastapi import Request  # noqa: E402
+
+import tcbs_account  # noqa: E402
+import portfolio_plan  # noqa: E402
+import portfolio_insights  # noqa: E402
+import forecast  # noqa: E402
+from agents.llm import call_llm, normalize_provider, resolve_api_key, LLMError  # noqa: E402
+from agents.prompts import PORTFOLIO_REVIEW_PROMPT, GROUNDING_RULES  # noqa: E402
+
+_LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost"}
+
+
+def _require_local(request: Request) -> None:
+    """Account data must not leak: the server binds 0.0.0.0 and CORS allows any origin,
+    so reject callers from other machines and pages served from other sites."""
+    client = request.client.host if request.client else ""
+    origin = request.headers.get("origin")
+    if client not in _LOCAL_HOSTS or (origin and urlparse(origin).hostname not in _LOCAL_HOSTS):
+        raise HTTPException(status_code=403, detail="Dữ liệu tài khoản TCBS chỉ truy cập được từ máy local.")
+
+
+def _tcbs_http_error(e: "tcbs_account.TcbsError") -> HTTPException:
+    return HTTPException(status_code=401 if e.needs_login else 502,
+                         detail={"message": str(e), "needs_login": e.needs_login})
+
+
+class TcbsLoginRequest(BaseModel):
+    otp: str
+
+
+class PortfolioReviewRequest(BaseModel):
+    provider: Optional[str] = "gemini"
+    apiKey: Optional[str] = None
+    model: Optional[str] = None
+
+
+class PortfolioPlanRequest(BaseModel):
+    goalPct: float = Field(default=20.0, gt=0, le=500)
+    goalMonths: int = Field(default=12, ge=1, le=60)
+    monthlyContribution: float = Field(default=0, ge=0, le=100_000_000_000)
+
+
+def _analysis_or_404():
+    snapshot = tcbs_account.load_snapshot()
+    if not snapshot:
+        raise HTTPException(status_code=404, detail={"message": "Chưa đồng bộ dữ liệu TCBS.", "needs_login": False})
+    return tcbs_account.analyze_snapshot(snapshot)
+
+
+def _build_plan(analysis, goal_pct: float = 20.0, goal_months: int = 12, monthly: float = 0.0):
+    market = portfolio_plan.fetch_market_data([h["ticker"] for h in analysis["holdings"]])
+    return portfolio_plan.build_plan(analysis, market, goal_pct, goal_months, monthly)
+
+
+@app.get("/api/account/status")
+def api_account_status(request: Request):
+    _require_local(request)
+    return tcbs_account.status()
+
+
+@app.post("/api/account/login")
+def api_account_login(req: TcbsLoginRequest, request: Request):
+    _require_local(request)
+    try:
+        tcbs_account.login(req.otp)
+    except tcbs_account.TcbsError as e:
+        raise HTTPException(status_code=400, detail={"message": str(e), "needs_login": True})
+    return tcbs_account.status()
+
+
+@app.post("/api/account/sync")
+def api_account_sync(request: Request):
+    _require_local(request)
+    try:
+        snapshot = tcbs_account.sync()
+    except tcbs_account.TcbsError as e:
+        raise _tcbs_http_error(e)
+    return tcbs_account.analyze_snapshot(snapshot)
+
+
+@app.get("/api/account/portfolio")
+def api_account_portfolio(request: Request):
+    _require_local(request)
+    return _analysis_or_404()
+
+
+@app.post("/api/account/plan")
+def api_account_plan(req: PortfolioPlanRequest, request: Request):
+    _require_local(request)
+    return _build_plan(_analysis_or_404(), req.goalPct, req.goalMonths, req.monthlyContribution)
+
+
+@app.get("/api/account/insights")
+def api_account_insights(request: Request):
+    _require_local(request)
+    analysis = _analysis_or_404()
+    tickers = [h["ticker"] for h in analysis["holdings"]]
+    market = portfolio_plan.fetch_market_data(tickers)
+    index_closes, companies, news = portfolio_insights.fetch_insight_data(tickers)
+    return portfolio_insights.build_insights(analysis, market, index_closes, companies, news)
+
+
+@app.get("/api/account/forecast")
+def api_account_forecast(request: Request):
+    _require_local(request)
+    analysis = _analysis_or_404()
+    plan = _build_plan(analysis)
+    tickers = [h["ticker"] for h in analysis["holdings"]]
+    history = forecast.fetch_long_history(tickers + ["VNINDEX"])
+    out = {}
+    for p in plan["positions"]:
+        levels = {"breakeven": p["breakeven"], "stop_loss": p.get("stop_loss"), "target": p.get("target")}
+        out[p["ticker"]] = forecast.forecast_ticker(history.get(p["ticker"], []), history.get("VNINDEX"), levels)
+    return {"forecasts": out, "method": "GARCH(1,1) + Filtered Historical Simulation (stationary bootstrap), walk-forward validated"}
+
+
+@app.post("/api/account/review")
+def api_account_review(req: PortfolioReviewRequest, request: Request):
+    _require_local(request)
+    analysis = _analysis_or_404()
+    provider = normalize_provider(req.provider)
+    api_key = resolve_api_key(provider, req.apiKey)
+    if api_key and analysis["holdings"]:
+        model = req.model or DEFAULT_MODELS.get(provider)
+        try:
+            text = call_llm(
+                prompt=f"{tcbs_account.llm_portfolio_brief(analysis)}\n\n{portfolio_plan.plan_brief(_build_plan(analysis))}",
+                system_prompt=f"{PORTFOLIO_REVIEW_PROMPT}\n\n{GROUNDING_RULES}",
+                provider=provider, api_key=api_key, model=model,
+            )
+            return {"content": text, "engine": f"{provider}:{model}"}
+        except LLMError as e:
+            return {"content": tcbs_account.heuristic_review(analysis), "engine": "heuristic",
+                    "warning": f"LLM gặp lỗi, dùng chế độ Heuristic: {e}"}
+    return {"content": tcbs_account.heuristic_review(analysis), "engine": "heuristic"}
 
 
 if __name__ == "__main__":

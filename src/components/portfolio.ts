@@ -43,6 +43,17 @@ function checkAlerts() {
 
 export function setPortfolioPrices(stocks: Array<{ ticker: string; close: number }>) { prices = new Map(stocks.map(stock => [stock.ticker, stock.close])); render(); checkAlerts(); }
 
+export function replaceHoldings(items: Array<{ ticker: string; quantity: number; avgPrice: number }>) { const addedAt = new Date().toISOString(); write(HOLDINGS_KEY, items.map(item => ({ ...item, addedAt }))); render(); }
+
+/** Add price alerts (thousand VND), skipping ones already tracked. Returns how many were added. */
+export function addAlerts(items: Array<{ ticker: string; type: Alert['type']; value: number }>): number {
+  const alerts = read<Alert[]>(ALERTS_KEY, []);
+  const fresh = items.filter(item => item.value > 0 && !alerts.some(a => a.ticker === item.ticker && a.type === item.type && Math.abs(a.value - item.value) < 1e-6 && !a.triggered));
+  fresh.forEach((item, i) => alerts.push({ id: `${Date.now()}-${i}-${item.ticker}`, ...item, triggered: false }));
+  if (fresh.length) { write(ALERTS_KEY, alerts); checkAlerts(); }
+  return fresh.length;
+}
+
 export function exportPortfolioCsv() {
   const holdings = read<Holding[]>(HOLDINGS_KEY, []);
   const rows = [['Ticker', 'Quantity', 'Average price', 'Current price', 'PnL', 'PnL %'], ...holdings.map(h => { const current = prices.get(h.ticker) ?? h.avgPrice; const pnl = (current - h.avgPrice) * h.quantity; return [h.ticker, String(h.quantity), h.avgPrice.toFixed(2), current.toFixed(2), pnl.toFixed(2), ((current - h.avgPrice) / h.avgPrice * 100).toFixed(2)]; })];

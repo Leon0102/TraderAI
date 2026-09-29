@@ -35,3 +35,6 @@ venv
 # Playwright MCP artifacts
 .playwright-mcp
 runtime/
+
+# Secrets
+key.txt

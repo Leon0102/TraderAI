@@ -3,3 +3,5 @@ runtime
 .playwright-mcp
 .kilo
 **/__pycache__
+key.txt
+.env*

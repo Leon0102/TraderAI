@@ -23,6 +23,7 @@ import { initAgentCouncil, openCouncilForTicker } from './components/agentCounci
 import { renderFeedMeta } from './components/provenance';
 import { setCurrentRecommendations } from './analysis/recommendation';
 import { initPortfolio, setPortfolioPrices } from './components/portfolio';
+import { initTcbsAccount } from './components/tcbsAccount';
 import type { TechnicalSignal } from './analysis/technicalAnalysis';
 import type { FundamentalSignal } from './analysis/fundamentalAnalysis';
 
@@ -278,6 +279,7 @@ async function init() {
   initAgentCouncil();
   initDailyPicks();
   initPortfolio();
+  initTcbsAccount();
   // Login only exists on the deployed site (Vercel middleware), not the local dev server
   const logoutLink = document.getElementById('logoutLink');
   if (logoutLink && !['localhost', '127.0.0.1'].includes(location.hostname)) logoutLink.hidden = false;
