@@ -2,6 +2,7 @@
 // dividends, corporate events, the trade journal, and the AI council run over every holding.
 import { fetchAgentCouncilAnalysis, type AgentCouncilVerdict } from '../api/stockApi';
 import { saveCouncilVerdict } from './agentCouncil';
+import { loadForecastScore } from './accountTools';
 
 type Insights = {
   benchmark: { portfolio_beta: number | null; stocks: Array<{ ticker: string; beta: number | null; correlation: number | null; weight_pct: number }>; windows: Array<{ window: string; portfolio_pct: number; vnindex_pct: number; excess_pct: number }> };
@@ -17,6 +18,7 @@ type Insights = {
     by_reason: Array<{ reason: string; closed: number; win_rate_pct: number; avg_pnl_pct: number }>;
     recent_trades: Array<{ key: string; date: string; ticker: string; side: 'B' | 'S'; qty: number; price: number; tag?: string | null; note?: string }>;
     tags: string[];
+    behavior?: { winner_hold_days: number | null; loser_hold_days: number | null; trades_per_month: number; fees_paid: number; fees_vs_gains_pct: number | null; revenge_tickers: string[]; notes: string[] };
   };
 };
 
@@ -254,6 +256,7 @@ function renderJournal(j: Insights['journal']): string {
     ${closed ? `<div class="portfolio-table-wrap"><table class="portfolio-table"><thead><tr><th>Ngày</th><th>Mã</th><th>SL bán</th><th>Giá vốn → bán</th><th>Lãi/lỗ</th><th>Lý do mua</th></tr></thead><tbody>${closed}</tbody></table></div>` : ''}
     ${reasons ? `<strong>Hiệu quả theo lý do vào lệnh</strong><div class="portfolio-table-wrap"><table class="portfolio-table"><thead><tr><th>Lý do</th><th>Số lệnh đóng</th><th>Tỷ lệ thắng</th><th>Lãi/lỗ TB</th></tr></thead><tbody>${reasons}</tbody></table></div>` : ''}
     ${tagRows ? `<strong>Gắn lý do cho giao dịch</strong><p class="form-hint">Lệnh bán được tính theo lý do của lệnh mua gần nhất cùng mã. Sau vài chục lệnh bạn sẽ thấy kiểu vào lệnh nào thật sự hiệu quả.</p><div class="portfolio-table-wrap"><table class="portfolio-table note-table"><thead><tr><th>Ngày</th><th>Mã</th><th>Lệnh</th><th>Lý do</th><th>Ghi chú</th><th></th></tr></thead><tbody>${tagRows}</tbody></table></div>` : ''}
+    ${j.behavior ? `<strong>Hành vi giao dịch</strong><dl class="acc-dl"><div><dt>Giữ mã lãi / mã lỗ trung bình</dt><dd>${j.behavior.winner_hold_days ?? '—'} / ${j.behavior.loser_hold_days ?? '—'} ngày</dd></div><div><dt>Tần suất</dt><dd>${j.behavior.trades_per_month} lệnh/tháng</dd></div><div><dt>Phí + thuế đã trả (ước tính)</dt><dd>${vnd(j.behavior.fees_paid)} đ${j.behavior.fees_vs_gains_pct != null ? ` · ${j.behavior.fees_vs_gains_pct}% tiền lãi` : ''}</dd></div></dl>${j.behavior.notes.map(n => `<p class="tcbs-flag medium">${esc(n)}</p>`).join('') || '<p class="plan-note">Chưa thấy thói quen xấu nào rõ rệt.</p>'}` : ''}
     ${j.unknown_basis_sells ? `<p class="form-hint">${j.unknown_basis_sells} lệnh bán chưa rõ giá vốn (bán trước khi app kịp ghi nhận vị thế) nên không tính vào lãi/lỗ.</p>` : ''}`;
 }
 
@@ -268,47 +271,47 @@ function render(data: Insights) {
   const stockBetas = b.stocks.map(s => `${esc(s.ticker)} β ${s.beta ?? '—'}`).join(' · ');
 
   box.innerHTML = `
-    <div class="plan-head"><h3>Phân tích chuyên sâu</h3></div>
 
-    <section class="insight-block">
+    <section class="insight-block" data-acc-tab="forecast">
       <h4>Dự báo định lượng</h4>
       <div id="insightForecast"></div>
+      <div id="forecastScore"></div>
     </section>
 
-    <section class="insight-block">
+    <section class="insight-block" data-acc-tab="risk">
       <h4>Quản trị rủi ro</h4>
       <div id="insightRisk"></div>
     </section>
 
-    <section class="insight-block">
+    <section class="insight-block" data-acc-tab="analysis">
       <h4>So với VN-Index</h4>
       <p class="plan-note">Beta danh mục: <b>${betaText(b.portfolio_beta)}</b>. Beta 1.3 nghĩa là VN-Index giảm 10% thì danh mục thường giảm ~13%. <span class="insight-muted">${stockBetas}</span></p>
       ${windows ? `<div class="portfolio-table-wrap"><table class="portfolio-table"><thead><tr><th>Giai đoạn</th><th>Danh mục hiện tại</th><th>VN-Index</th><th>Chênh lệch</th></tr></thead><tbody>${windows}</tbody></table></div><p class="form-hint">Mô phỏng: nếu nắm đúng tỷ trọng hiện tại từ đầu giai đoạn (không gồm tiền mặt, phí, cổ tức).</p>` : ''}
     </section>
 
-    <section class="insight-block">
+    <section class="insight-block" data-acc-tab="analysis">
       <h4>Phân bổ theo ngành</h4>
       <div class="sector-list">${sectors}</div>
       ${data.sectors.flags.map(f => `<p class="tcbs-flag medium">${esc(f)}</p>`).join('')}
     </section>
 
-    <section class="insight-block">
+    <section class="insight-block" data-acc-tab="analysis">
       <h4>Nhà phân tích &amp; cổ tức</h4>
       <div class="portfolio-table-wrap"><table class="portfolio-table"><thead><tr><th>Mã</th><th>Khuyến nghị</th><th>Giá mục tiêu</th><th>Upside</th><th>So với giá vốn</th><th>Cổ tức/cp</th><th>Tỷ suất/giá vốn</th></tr></thead><tbody>${analysts}</tbody></table></div>
       <p class="form-hint">Nguồn: Vietcap. ${data.analysts.dividend_income_annual ? `Cổ tức tiền ước tính theo số cổ phiếu đang nắm: <b>${vnd(data.analysts.dividend_income_annual)} đ/năm</b>.` : ''}</p>
     </section>
 
-    <section class="insight-block">
+    <section class="insight-block" data-acc-tab="analysis">
       <h4>Lịch sự kiện doanh nghiệp (120 ngày)</h4>
       ${events ? `<ul class="event-list">${events}</ul><p class="form-hint">Mua trước ngày GDKHQ mới được nhận cổ tức/quyền; sau ngày đó giá được điều chỉnh giảm tương ứng.</p>` : '<p class="form-hint">Không có công bố cổ tức, chốt quyền hay phát hành gần đây.</p>'}
     </section>
 
-    <section class="insight-block">
+    <section class="insight-block" data-acc-tab="journal">
       <h4>Nhật ký giao dịch &amp; hiệu suất</h4>
       ${renderJournal(data.journal)}
     </section>
 
-    <section class="insight-block">
+    <section class="insight-block" data-acc-tab="report">
       <h4>Báo cáo tuần</h4>
       <p class="plan-note">Tổng hợp NAV, lãi/lỗ, cảnh báo, rủi ro, sự kiện và việc cần làm. Từ thứ Sáu, lần mở app đầu tiên trong tuần sẽ tự tạo báo cáo; file lưu trong runtime/reports/.</p>
       <div class="plan-alerts"><button class="btn-ghost" id="reportMake" type="button">Tạo báo cáo tuần này</button><span id="reportStatus" class="form-hint"></span></div>
@@ -316,7 +319,7 @@ function render(data: Insights) {
       <div id="reportOut"></div>
     </section>
 
-    <section class="insight-block">
+    <section class="insight-block" data-acc-tab="tools">
       <h4>Hội đồng AI cho toàn danh mục</h4>
       <p class="plan-note">Chạy Hội đồng AI (kỹ thuật, cơ bản, tin tức, tranh biện Bò/Gấu, CIO) lần lượt cho từng mã đang nắm. Mỗi mã mất khoảng 30–90 giây khi dùng LLM.</p>
       <div class="plan-alerts"><button class="btn-ghost" id="councilAllRun" type="button">Chạy cho ${tickers.length} mã</button><button class="btn-ghost" id="councilAllStop" type="button" hidden>Dừng</button><span id="councilAllStatus" class="form-hint"></span></div>
@@ -336,6 +339,7 @@ function render(data: Insights) {
     setTimeout(() => { btn.textContent = 'Lưu'; }, 1500);
   }));
   loadForecast();
+  loadForecastScore();
   loadRisk();
   loadReports();
 }
@@ -385,7 +389,7 @@ export async function loadInsights(syncedAt: string, holdingTickers: string[]) {
   insightsKey = syncedAt;
   tickers = holdingTickers;
   box.hidden = false;
-  box.innerHTML = '<p class="form-hint">Đang tải so sánh VN-Index, ngành, cổ tức và sự kiện…</p>';
+  box.innerHTML = ['forecast', 'risk', 'analysis', 'journal', 'report'].map(t => `<p class="form-hint" data-acc-tab="${t}">Đang tải dữ liệu phân tích…</p>`).join('');
   try {
     const res = await fetch('/api/account/insights');
     const body = await res.json().catch(() => ({}));

@@ -20,7 +20,7 @@ import json
 import os
 import sys
 import time
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 BASE_URL = "https://openapi.tcbs.com.vn"
@@ -210,16 +210,26 @@ def sync(custody_code: Optional[str] = None) -> Dict[str, Any]:
                 if e.needs_login:
                     raise
                 errors.append(f"{mask_account(acct)} {name}: {e}")
+        if (sub.get("accountType") or "").upper() == "MARGIN":
+            try:  # 4.11: Rtt, principal/interest debt and the maintenance/liquidation thresholds
+                entry["risk"] = strip_pii(_get(f"/hydros/v1/account/{acct}/risk", token))
+            except TcbsError as e:
+                if e.needs_login:
+                    raise
+                errors.append(f"{mask_account(acct)} risk: {e}")
         accounts.append(entry)
 
     snapshot = {"synced_at": datetime.now().isoformat(timespec="seconds"), "accounts": accounts, "errors": errors}
     _write_private(SNAPSHOT_FILE, snapshot)
     # TCBS only exposes today's matches, so keep a running journal for realized P&L.
     from portfolio_insights import update_journal
-    try:
-        update_journal(snapshot)
-    except Exception as e:  # the journal is a bonus; never fail the sync over it
-        snapshot["errors"].append(f"journal: {e.__class__.__name__}")
+    from nav_history import record as record_nav
+    for label, step in (("journal", lambda: update_journal(snapshot)),
+                        ("nav history", lambda: record_nav(analyze_snapshot(snapshot)))):
+        try:
+            step()
+        except Exception as e:  # bonuses; never fail the sync over them
+            snapshot["errors"].append(f"{label}: {e.__class__.__name__}")
     return snapshot
 
 
@@ -264,6 +274,37 @@ def _rows(payload: Any, key: str = "data") -> List[Dict[str, Any]]:
     return payload if isinstance(payload, list) else []
 
 
+def add_business_days(day: date, n: int) -> date:
+    """T+n settlement, skipping weekends (exchange holidays are not modelled)."""
+    while n > 0:
+        day += timedelta(days=1)
+        if day.weekday() < 5:
+            n -= 1
+    return day
+
+
+def margin_summary(acct: Dict[str, Any], assets: float) -> Optional[Dict[str, Any]]:
+    """Rtt and how far prices can fall (uniformly) before the maintenance / liquidation ratios."""
+    rows = _rows(acct.get("risk")) or ([acct["risk"]] if isinstance(acct.get("risk"), dict) else [])
+    if not rows:
+        return None
+    r = rows[0]
+    debt = _num(r.get("outstanding")) + _num(r.get("accruedInterest")) + _num(r.get("totalFeeDebt"))
+    policy = r.get("riskPolicy") or {}
+    out: Dict[str, Any] = {
+        "account": mask_account(acct.get("accountNo")), "rtt_pct": _num(r.get("rtt")), "debt": round(debt),
+        "due": round(_num(r.get("dueAmount"))), "overdue": round(_num(r.get("overdueAmount"))),
+        "status": (r.get("riskStatus") or {}).get("description") or (r.get("riskStatus") or {}).get("code"),
+        "maintenance_pct": _num(policy.get("maintenanceMargin")) or None,
+        "liquidation_pct": _num(policy.get("liquidationMargin")) or None,
+    }
+    # Rtt = (A − D)/A. A uniform drop x reaches ratio m when 1 − x = D / (A·(1 − m)).
+    for key, ratio in (("drop_to_call_pct", out["maintenance_pct"]), ("drop_to_liquidation_pct", out["liquidation_pct"])):
+        if debt > 0 and assets > 0 and ratio and ratio < 100:
+            out[key] = round(max(0.0, 1 - debt / (assets * (1 - ratio / 100))) * 100, 1)
+    return out
+
+
 def analyze_snapshot(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     """Merge every sub-account into one portfolio view: positions, cash, concentration, risk flags."""
     positions: Dict[str, Dict[str, Any]] = {}
@@ -271,6 +312,13 @@ def analyze_snapshot(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     trades: Dict[str, Dict[str, float]] = {}
     order_status: Dict[str, int] = {}
     accounts_out = []
+    margins: List[Dict[str, Any]] = []
+    debt_total = 0.0
+    cash_calendar: List[Dict[str, Any]] = []
+    try:
+        trade_day = datetime.fromisoformat(snapshot.get("synced_at") or "").date()
+    except ValueError:
+        trade_day = date.today()
 
     for acct in snapshot.get("accounts", []):
         acct_value = 0.0
@@ -303,15 +351,22 @@ def analyze_snapshot(snapshot: Dict[str, Any]) -> Dict[str, Any]:
             qty, price = _num(m.get("qtty")), _vnd(_num(m.get("price")))
             t[f"{side}_qty"] += qty
             t[f"{side}_value"] += qty * price
+            settle = add_business_days(trade_day, 2).isoformat()
+            cash_calendar.append({"date": settle, "ticker": sym, "kind": "Tiền bán về" if side == "sell" else "Cổ phiếu mua về",
+                                  "amount": round(qty * price) if side == "sell" else None, "quantity": int(qty)})
         for o in _rows(acct.get("orders")):
             st = str(o.get("status") or "UNKNOWN")
             order_status[st] = order_status.get(st, 0) + 1
+        m = margin_summary(acct, acct_value + acct_cash)
+        if m:
+            margins.append(m)
+            debt_total += m["debt"]
         accounts_out.append({"account": mask_account(acct.get("accountNo")), "type": acct.get("accountType"),
-                             "stock_value": round(acct_value), "cash": round(acct_cash)})
+                             "stock_value": round(acct_value), "cash": round(acct_cash), "debt": m["debt"] if m else 0})
 
     stock_value = sum(p["market_value"] for p in positions.values())
     cost_value = sum(p["cost_value"] for p in positions.values())
-    nav = stock_value + cash_total
+    nav = stock_value + cash_total - debt_total  # net asset value: margin debt belongs to TCBS
     holdings = []
     for p in sorted(positions.values(), key=lambda x: -x["market_value"]):
         pnl = p["market_value"] - p["cost_value"]
@@ -353,6 +408,14 @@ def analyze_snapshot(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         flags.append({"level": "medium", "text": f"Tiền mặt chỉ {cash_pct}% — thiếu dư địa bắt đáy / xử lý rủi ro."})
     if nav and cash_pct > 60:
         flags.append({"level": "info", "text": f"Tiền mặt {cash_pct}% — phần lớn vốn đang nhàn rỗi."})
+    for m in margins:
+        drop = m.get("drop_to_call_pct")
+        if m["debt"] > 0 and drop is not None and drop < 15:
+            flags.append({"level": "high", "text": f"Tiểu khoản margin {m['account']}: giá giảm thêm {drop}% là chạm ngưỡng call ({m['maintenance_pct']}%). Rtt hiện {m['rtt_pct']}%."})
+        if m["overdue"] > 0:
+            flags.append({"level": "high", "text": f"Tiểu khoản margin {m['account']} có nợ quá hạn {round(m['overdue']):,} đ.".replace(",", ".")})
+    if cash_dividend > 0:
+        cash_calendar.append({"date": None, "ticker": None, "kind": "Cổ tức tiền chờ về", "amount": round(cash_dividend), "quantity": None})
 
     return {
         "synced_at": snapshot.get("synced_at"),
@@ -362,7 +425,10 @@ def analyze_snapshot(snapshot: Dict[str, Any]) -> Dict[str, Any]:
             "unrealized_pnl_pct": round((stock_value - cost_value) / cost_value * 100, 2) if cost_value else 0.0,
             "cash": round(cash_total), "cash_pct": cash_pct, "withdrawable": round(withdrawable),
             "pending_buy": round(pending_buy), "cash_dividend_pending": round(cash_dividend),
+            "debt": round(debt_total), "gross_assets": round(stock_value + cash_total),
         },
+        "margin": margins,
+        "cash_calendar": sorted(cash_calendar, key=lambda c: c["date"] or "9999"),
         "holdings": holdings,
         "concentration": concentration,
         "flags": flags,

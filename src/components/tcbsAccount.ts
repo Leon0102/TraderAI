@@ -2,6 +2,8 @@
 // /api/account/*); on the deployed site those routes don't exist and the panel says so.
 import { addAlerts, replaceHoldings } from './portfolio';
 import { loadInsights } from './portfolioInsights';
+import { initAccountTabs, loadOverview, type OverviewAnalysis } from './accountOverview';
+import { loadAdvanced, loadTools } from './accountTools';
 
 type Holding = { ticker: string; quantity: number; sellable: number; pending: number; avg_cost: number; price: number; market_value: number; pnl: number; pnl_pct: number; weight_pct: number };
 type Analysis = {
@@ -99,6 +101,9 @@ function render() {
     ${analysis.errors.length ? `<p class="form-hint negative">Một số dữ liệu chưa tải được: ${analysis.errors.map(esc).join('; ')}</p>` : ''}`;
   loadPlan();
   loadInsights(analysis.synced_at, analysis.holdings.map(h => h.ticker));
+  loadOverview(analysis as unknown as OverviewAnalysis);
+  if (analysis.holdings.length) loadAdvanced(analysis.synced_at);
+  loadTools(analysis.synced_at);
   box.querySelectorAll<HTMLElement>('[data-tcbs-council]').forEach(btn => btn.addEventListener('click', () => window.openCouncilForTicker?.(btn.dataset.tcbsCouncil!)));
 }
 
@@ -116,6 +121,8 @@ async function refreshStatus(): Promise<Status | null> {
     return st;
   } catch {
     $('tcbsPanel')?.classList.add('tcbs-offline');
+    const tabs = $('accTabs');
+    if (tabs) tabs.hidden = true;
     setStatus('Chỉ khả dụng khi chạy backend trên máy local (python3 backend/server.py).');
     return null;
   }
@@ -299,6 +306,7 @@ export function initTcbsAccount() {
     replaceHoldings(analysis.holdings.map(h => ({ ticker: h.ticker, quantity: h.quantity, avgPrice: h.avg_cost / 1000 })));
   });
   // Ask for the OTP up front: a still-valid token syncs straight away, otherwise prompt.
+  initAccountTabs();
   refreshStatus().then(st => {
     if (!st?.configured) return;
     if (st.logged_in) sync(); else openOtpDialog();

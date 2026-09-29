@@ -150,10 +150,23 @@
             </div>
           </form>
         </dialog>
-        <div id="tcbsContent"></div>
-          <div id="tcbsPlan" class="tcbs-plan" hidden></div>
+        <nav class="acc-tabs" id="accTabs" role="tablist" aria-label="Các mục tài khoản" hidden>
+          <button type="button" role="tab" data-tab-btn="overview">Tổng quan</button>
+          <button type="button" role="tab" data-tab-btn="plan">Kế hoạch</button>
+          <button type="button" role="tab" data-tab-btn="risk">Rủi ro</button>
+          <button type="button" role="tab" data-tab-btn="forecast">Dự báo</button>
+          <button type="button" role="tab" data-tab-btn="analysis">Phân tích</button>
+          <button type="button" role="tab" data-tab-btn="journal">Nhật ký</button>
+          <button type="button" role="tab" data-tab-btn="tools">Công cụ</button>
+          <button type="button" role="tab" data-tab-btn="report">Báo cáo</button>
+        </nav>
+        <div id="tcbsContent" data-acc-tab="overview"></div>
+        <div id="accOverview" class="tcbs-plan" data-acc-tab="overview" hidden></div>
+        <div id="tcbsReviewOut" class="tcbs-review" data-acc-tab="overview" hidden></div>
+          <div id="tcbsPlan" class="tcbs-plan" data-acc-tab="plan" hidden></div>
+        <div id="accAdvanced" class="tcbs-plan" data-acc-tab="risk" hidden></div>
+        <div id="accTools" class="tcbs-plan" data-acc-tab="tools" hidden></div>
         <div id="tcbsInsights" class="tcbs-plan" hidden></div>
-        <div id="tcbsReviewOut" class="tcbs-review" hidden></div>
         </div>
         <div class="portfolio-grid">
           <form class="portfolio-form" id="portfolioForm">

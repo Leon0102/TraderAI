@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "local": "bash scripts/dev-local.sh",
+    "test:py": "for t in backend/test_tcbs_account.py backend/test_portfolio_plan.py backend/test_portfolio_insights.py backend/test_forecast.py backend/test_risk_tools.py backend/test_account_extras.py; do ${PYTHON:-python3} $t || exit 1; done"
   },
   "devDependencies": {
     "typescript": "~5.9.3",

@@ -245,12 +245,15 @@ def fetch_dated_history(tickers: List[str], years: int = 5) -> Dict[str, List[Tu
 
     end = datetime.now().strftime("%Y-%m-%d")
     start = (datetime.now() - timedelta(days=365 * years + 30)).strftime("%Y-%m-%d")
-    out: Dict[str, List[Tuple[str, float]]] = {}
-    for t in tickers:
+    from concurrent.futures import ThreadPoolExecutor
+
+    def one(t: str) -> List[Tuple[str, float]]:
         try:
             bars = (get_history(t, start, end) or {}).get("data") or []
         except Exception:
             bars = []
         scale = (lambda c: c) if t == "VNINDEX" else (lambda c: c * 1000 if 0 < c < 1000 else c)
-        out[t] = [(b.get("tradingDate", ""), scale(float(b["close"]))) for b in bars if b.get("close")]
-    return out
+        return [(b.get("tradingDate", ""), scale(float(b["close"]))) for b in bars if b.get("close")]
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        return dict(zip(tickers, pool.map(one, tickers)))

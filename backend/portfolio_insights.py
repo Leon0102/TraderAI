@@ -37,7 +37,19 @@ def load_journal() -> Dict[str, Any]:
     j.setdefault("trades", {})
     j.setdefault("last_cost", {})
     j.setdefault("notes", {})
+    j.setdefault("plans", {})
     return j
+
+
+def add_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
+    """Save a checked trade idea; the next journaled buy of that ticker inherits its reason and note."""
+    journal = load_journal()
+    if plan.get("reason") and plan["reason"] not in TRADE_TAGS:
+        raise ValueError("Nhãn lý do không hợp lệ.")
+    pid = f"{plan['date']}:{plan['ticker']}:{len(journal['plans']) + 1}"
+    journal["plans"][pid] = {**plan, "used_by": None}
+    ta._write_private(JOURNAL_FILE, journal)
+    return {"id": pid, **journal["plans"][pid]}
 
 
 def set_note(key: str, tag: Optional[str], note: str) -> Dict[str, Any]:
@@ -83,8 +95,24 @@ def merge_trades(journal: Dict[str, Any], snapshot: Dict[str, Any]) -> int:
                 trade["cost_basis"] = current_cost.get(ticker) or journal["last_cost"].get(ticker)
             journal["trades"][key] = trade
             added += 1
+            if side == "B" and key not in journal.get("notes", {}):
+                _apply_plan(journal, key, trade)
     journal["last_cost"].update(current_cost)
     return added
+
+
+def _apply_plan(journal: Dict[str, Any], key: str, trade: Dict[str, Any]) -> None:
+    """Link a buy to the most recent unused plan for the ticker made within the last 14 days."""
+    day = datetime.fromisoformat(trade["date"])
+    candidates = [(pid, p) for pid, p in journal.get("plans", {}).items()
+                  if p["ticker"] == trade["ticker"] and not p.get("used_by")
+                  and 0 <= (day - datetime.fromisoformat(p["date"])).days <= 14]
+    if not candidates:
+        return
+    pid, plan = max(candidates, key=lambda kv: kv[1]["date"])
+    plan["used_by"] = key
+    journal.setdefault("notes", {})[key] = {"tag": plan.get("reason"), "note": (plan.get("note") or "")[:300],
+                                            "plan": {k: plan.get(k) for k in ("price", "stop", "target", "verdict")}}
 
 
 def update_journal(snapshot: Dict[str, Any]) -> int:
@@ -135,6 +163,7 @@ def journal_stats(journal: Dict[str, Any]) -> Dict[str, Any]:
         pt["sells"] += 1
         monthly[t["date"][:7]] = monthly.get(t["date"][:7], 0.0) + pnl
         remaining = t["qty"]
+        sell_days: List[Tuple[float, float]] = []
         for lot in lots.get(t["ticker"], []):
             if remaining <= 0:
                 break
@@ -142,9 +171,15 @@ def journal_stats(journal: Dict[str, Any]) -> Dict[str, Any]:
             if take > 0:
                 days = (datetime.fromisoformat(t["date"]) - datetime.fromisoformat(lot[1])).days
                 hold_days.append((days, take))
+                sell_days.append((days, take))
                 lot[0] -= take
                 remaining -= take
+        if sell_days:
+            closed[-1]["hold_days"] = sum(d * q for d, q in sell_days) / sum(q for _, q in sell_days)
 
+    behavior = trading_behavior(trades, closed, fees)
+    for c in closed:
+        c.pop("hold_days", None)
     wins = [c for c in closed if c["pnl"] > 0]
     losses = [c for c in closed if c["pnl"] <= 0]
     gross_win = sum(c["pnl"] for c in wins)
@@ -170,7 +205,45 @@ def journal_stats(journal: Dict[str, Any]) -> Dict[str, Any]:
         "recent_trades": [{"key": k, **{f: t[f] for f in ("date", "ticker", "side", "qty", "price")},
                            "qty": int(t["qty"]), "price": round(t["price"]), **(notes.get(k) or {})} for k, t in keyed[-30:][::-1]],
         "tags": list(TRADE_TAGS),
+        "behavior": behavior,
     }
+
+
+def trading_behavior(trades: List[Dict[str, Any]], closed: List[Dict[str, Any]], fees: Dict[str, float]) -> Dict[str, Any]:
+    """Common behavioural leaks, measured from the journal.
+
+    - disposition effect: losers held longer than winners (Shefrin & Statman 1985).
+    - overtrading: trades per month and what fees + tax cost relative to gains.
+    - revenge trading: buying a ticker back within 5 days of selling it at a loss.
+    """
+    def avg_days(rows: List[Dict[str, Any]]) -> Optional[float]:
+        d = [c["hold_days"] for c in rows if c.get("hold_days") is not None]
+        return round(sum(d) / len(d), 1) if d else None
+
+    win_days = avg_days([c for c in closed if c["pnl"] > 0])
+    loss_days = avg_days([c for c in closed if c["pnl"] <= 0])
+    cost = sum(t["qty"] * t["price"] * (0.001 if t["side"] == "B" else fees["sell_fee"] + fees["sell_tax"]) for t in trades)
+    gross_win = sum(c["pnl"] for c in closed if c["pnl"] > 0)
+    months = 1.0
+    if trades:
+        span = (datetime.fromisoformat(trades[-1]["date"]) - datetime.fromisoformat(trades[0]["date"])).days
+        months = max(1.0, span / 30.4)
+    losing_sells = [(c["ticker"], datetime.fromisoformat(c["date"])) for c in closed if c["pnl"] < 0]
+    revenge = sorted({t["ticker"] for t in trades if t["side"] == "B" and any(
+        tk == t["ticker"] and 0 <= (datetime.fromisoformat(t["date"]) - d).days <= 5 for tk, d in losing_sells)})
+    notes = []
+    if win_days is not None and loss_days is not None and loss_days > win_days * 1.5:
+        notes.append(f"Bạn giữ mã lỗ trung bình {loss_days} ngày, lâu hơn nhiều so với mã lãi ({win_days} ngày) — dấu hiệu \"gồng lỗ, chốt non\".")
+    per_month = round(len(trades) / months, 1)
+    if per_month > 20:
+        notes.append(f"{per_month} lệnh/tháng — tần suất cao, phí và thuế đang ăn vào lợi nhuận.")
+    if gross_win > 0 and cost / gross_win > 0.25:
+        notes.append(f"Phí + thuế ≈ {cost / gross_win * 100:.0f}% tổng tiền lãi các lệnh thắng.")
+    if revenge:
+        notes.append(f"Mua lại ngay sau khi cắt lỗ (≤5 ngày): {', '.join(revenge)} — dễ là giao dịch trả thù.")
+    return {"winner_hold_days": win_days, "loser_hold_days": loss_days, "trades_per_month": per_month,
+            "fees_paid": round(cost), "fees_vs_gains_pct": round(cost / gross_win * 100, 1) if gross_win > 0 else None,
+            "revenge_tickers": revenge, "notes": notes}
 
 
 # ---------- benchmark ----------
@@ -297,14 +370,19 @@ def fetch_insight_data(tickers: List[str]) -> Tuple[List[Tuple[str, float]], Dic
     start = (datetime.now() - timedelta(days=380)).strftime("%Y-%m-%d")
     bars = (get_history("VNINDEX", start, end) or {}).get("data") or []
     index_closes = [(b.get("tradingDate", ""), float(b["close"])) for b in bars if b.get("close")]
-    companies, news = {}, {}
-    for t in tickers:
+    from concurrent.futures import ThreadPoolExecutor
+
+    def one(t: str) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
         try:
-            companies[t] = _vci.company_info(t) or {}
+            info = _vci.company_info(t) or {}
         except Exception:
-            companies[t] = {}
+            info = {}
         try:
-            news[t] = _vci.company_news(t, days=120, size=20)
+            items = _vci.company_news(t, days=120, size=20)
         except Exception:
-            news[t] = []
-    return index_closes, companies, news
+            items = []
+        return info, items
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = dict(zip(tickers, pool.map(one, tickers)))
+    return index_closes, {t: r[0] for t, r in results.items()}, {t: r[1] for t, r in results.items()}

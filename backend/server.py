@@ -197,6 +197,13 @@ import portfolio_insights  # noqa: E402
 import forecast  # noqa: E402
 import risk_tools  # noqa: E402
 import weekly_report  # noqa: E402
+import pipeline  # noqa: E402
+import nav_history  # noqa: E402
+import personal_rules  # noqa: E402
+import pretrade  # noqa: E402
+import forecast_tracking  # noqa: E402
+import autosync  # noqa: E402
+import notify  # noqa: E402
 from agents.llm import call_llm, normalize_provider, resolve_api_key, LLMError  # noqa: E402
 from agents.prompts import PORTFOLIO_REVIEW_PROMPT, GROUNDING_RULES  # noqa: E402
 
@@ -240,9 +247,7 @@ def _analysis_or_404():
     return tcbs_account.analyze_snapshot(snapshot)
 
 
-def _build_plan(analysis, goal_pct: float = 20.0, goal_months: int = 12, monthly: float = 0.0):
-    market = portfolio_plan.fetch_market_data([h["ticker"] for h in analysis["holdings"]])
-    return portfolio_plan.build_plan(analysis, market, goal_pct, goal_months, monthly)
+_build_plan = pipeline.build_plan
 
 
 @app.get("/api/account/status")
@@ -286,50 +291,22 @@ def api_account_plan(req: PortfolioPlanRequest, request: Request):
 @app.get("/api/account/insights")
 def api_account_insights(request: Request):
     _require_local(request)
-    analysis = _analysis_or_404()
-    tickers = [h["ticker"] for h in analysis["holdings"]]
-    market = portfolio_plan.fetch_market_data(tickers)
-    index_closes, companies, news = portfolio_insights.fetch_insight_data(tickers)
-    return portfolio_insights.build_insights(analysis, market, index_closes, companies, news)
-
-
-def _forecasts(plan, history):
-    """Forecast every position; `history` is {ticker: [(date, close)]} including VNINDEX."""
-    index = [c for _, c in history.get("VNINDEX", [])]
-    out = {}
-    for p in plan["positions"]:
-        levels = {"breakeven": p["breakeven"], "stop_loss": p.get("stop_loss"), "target": p.get("target")}
-        out[p["ticker"]] = forecast.forecast_ticker([c for _, c in history.get(p["ticker"], [])], index, levels)
-    return out
-
-
-def _risk_context(analysis, risk_pct: float = 1.0):
-    """Plan, 5-year history, forecasts, betas and risk tools in one pass (shared by risk + report)."""
-    plan = _build_plan(analysis)
-    tickers = [h["ticker"] for h in analysis["holdings"]]
-    history = risk_tools.fetch_dated_history(tickers + ["VNINDEX"])
-    forecasts = _forecasts(plan, history)
-    bench = portfolio_insights.benchmark(analysis["holdings"], {t: {"closes": history.get(t, [])} for t in tickers},
-                                         history.get("VNINDEX", []), analysis["summary"]["nav"])
-    betas = {row["ticker"]: row["beta"] for row in bench["stocks"]}
-    risk = risk_tools.build_risk(analysis, plan, history, forecasts, betas, risk_pct)
-    return plan, forecasts, risk
+    return pipeline.insights(_analysis_or_404())
 
 
 @app.get("/api/account/forecast")
 def api_account_forecast(request: Request):
     _require_local(request)
     analysis = _analysis_or_404()
-    history = risk_tools.fetch_dated_history([h["ticker"] for h in analysis["holdings"]] + ["VNINDEX"], years=3)
-    return {"forecasts": _forecasts(_build_plan(analysis), history),
+    history = pipeline.history_for([h["ticker"] for h in analysis["holdings"]], years=3)
+    return {"forecasts": pipeline.forecasts_for(_build_plan(analysis), history),
             "method": "GARCH(1,1) + Filtered Historical Simulation (stationary bootstrap), walk-forward validated"}
 
 
 @app.get("/api/account/risk")
 def api_account_risk(request: Request, riskPct: float = Query(default=1.0, gt=0, le=10)):
     _require_local(request)
-    _, _, risk = _risk_context(_analysis_or_404(), riskPct)
-    return risk
+    return pipeline.risk_context(_analysis_or_404(), riskPct)["risk"]
 
 
 class TradeNoteRequest(BaseModel):
@@ -352,14 +329,7 @@ def api_account_journal_note(req: TradeNoteRequest, request: Request):
 @app.post("/api/account/report")
 def api_account_report(request: Request):
     _require_local(request)
-    analysis = _analysis_or_404()
-    plan, forecasts, risk = _risk_context(analysis)
-    tickers = [h["ticker"] for h in analysis["holdings"]]
-    market = portfolio_plan.fetch_market_data(tickers)
-    index_closes, companies, news = portfolio_insights.fetch_insight_data(tickers)
-    insights = portfolio_insights.build_insights(analysis, market, index_closes, companies, news)
-    markdown = weekly_report.build_report(analysis, plan, insights, forecasts, risk)
-    return {"name": weekly_report.save_report(markdown), "markdown": markdown}
+    return pipeline.weekly_report_now(_analysis_or_404())
 
 
 @app.get("/api/account/reports")
@@ -375,6 +345,164 @@ def api_account_report_get(name: str, request: Request):
     if markdown is None:
         raise HTTPException(status_code=404, detail={"message": "Không có báo cáo này.", "needs_login": False})
     return {"name": name, "markdown": markdown}
+
+
+def _bad_request(e: Exception) -> HTTPException:
+    return HTTPException(status_code=400, detail={"message": str(e), "needs_login": False})
+
+
+def _vnd_input(v: Optional[float]) -> Optional[float]:
+    """Accept prices typed in thousand VND (25.5) or VND (25500)."""
+    return None if v is None else (v * 1000 if 0 < v < 1000 else v)
+
+
+@app.get("/api/account/nav")
+def api_account_nav(request: Request):
+    _require_local(request)
+    h = nav_history.load()
+    days = sorted(h["days"])
+    index = pipeline.history_for([], years=max(1, (len(days) // 250) + 1)).get("VNINDEX", []) if days else []
+    return nav_history.metrics(h, index)
+
+
+class NavFlowRequest(BaseModel):
+    date: str
+    amount: Optional[float] = None
+
+
+@app.post("/api/account/nav/flow")
+def api_account_nav_flow(req: NavFlowRequest, request: Request):
+    _require_local(request)
+    try:
+        nav_history.set_flow(req.date, req.amount)
+    except ValueError as e:
+        raise _bad_request(e)
+    return {"ok": True}
+
+
+@app.get("/api/account/rules")
+def api_account_rules(request: Request):
+    _require_local(request)
+    rules = personal_rules.load_rules()
+    snapshot = tcbs_account.load_snapshot()
+    violations = []
+    if snapshot:
+        analysis = tcbs_account.analyze_snapshot(snapshot)
+        violations = personal_rules.evaluate(analysis, pipeline.sectors_for([h["ticker"] for h in analysis["holdings"]]), rules)
+    return {"rules": rules, "violations": violations, "tags": list(portfolio_insights.TRADE_TAGS)}
+
+
+@app.post("/api/account/rules")
+def api_account_rules_save(update: dict, request: Request):
+    _require_local(request)
+    try:
+        personal_rules.save_rules(update)
+    except (ValueError, TypeError) as e:
+        raise _bad_request(e)
+    return api_account_rules(request)
+
+
+class PretradeRequest(BaseModel):
+    ticker: str = Field(pattern=r"^[A-Za-z0-9]{1,6}$")
+    price: float = Field(gt=0)
+    stop: float = Field(gt=0)
+    target: Optional[float] = Field(default=None, gt=0)
+    quantity: Optional[int] = Field(default=None, gt=0)
+
+
+@app.post("/api/account/pretrade")
+def api_account_pretrade(req: PretradeRequest, request: Request):
+    _require_local(request)
+    analysis = _analysis_or_404()
+    ticker = req.ticker.upper()
+    price, stop, target = _vnd_input(req.price), _vnd_input(req.stop), _vnd_input(req.target)
+    tickers = [h["ticker"] for h in analysis["holdings"]]
+    history = pipeline.history_for(tickers + [ticker], years=3)
+    companies = pipeline.companies_for(list(dict.fromkeys(tickers + [ticker])))
+    sectors = {t: c.get("sectorVn") for t, c in companies.items() if c.get("sectorVn")}
+    levels = {"breakeven": None, "stop_loss": stop, "target": target or companies.get(ticker, {}).get("targetPrice")}
+    fc = forecast.forecast_ticker([c for _, c in history.get(ticker, [])], [c for _, c in history.get("VNINDEX", [])], levels, validate=False)
+    import portfolio_advanced
+    s = analysis["summary"]
+    regime = portfolio_advanced.market_regime([c for _, c in history.get("VNINDEX", [])], s["stock_value"] / s["nav"] * 100 if s["nav"] else 0)
+    import _vci
+    try:
+        news = _vci.company_news(ticker, days=30, size=20)
+    except Exception:
+        news = []
+    result = pretrade.run_checks(analysis, personal_rules.load_rules(), ticker, price, stop, target, req.quantity,
+                                 companies.get(ticker) or {}, sectors, history, fc, regime, news)
+    return {"ticker": ticker, "price": round(price), "stop": round(stop), "target": round(target) if target else None, **result}
+
+
+class TradePlanRequest(BaseModel):
+    ticker: str = Field(pattern=r"^[A-Za-z0-9]{1,6}$")
+    price: float = Field(gt=0)
+    stop: float = Field(gt=0)
+    target: Optional[float] = None
+    quantity: Optional[int] = None
+    reason: Optional[str] = None
+    note: str = Field(default="", max_length=300)
+    verdict: Optional[str] = None
+
+
+@app.post("/api/account/pretrade/plan")
+def api_account_pretrade_plan(req: TradePlanRequest, request: Request):
+    _require_local(request)
+    from datetime import date as _date
+    try:
+        return portfolio_insights.add_plan({"date": _date.today().isoformat(), "ticker": req.ticker.upper(),
+                                            "price": _vnd_input(req.price), "stop": _vnd_input(req.stop), "target": _vnd_input(req.target),
+                                            "quantity": req.quantity, "reason": req.reason, "note": req.note, "verdict": req.verdict})
+    except ValueError as e:
+        raise _bad_request(e)
+
+
+@app.get("/api/account/forecast/score")
+def api_account_forecast_score(request: Request):
+    _require_local(request)
+    log = forecast_tracking.load_log()
+    tickers = sorted({e["ticker"] for e in log.values()})
+    history = pipeline.history_for(tickers, years=1) if tickers else {}
+    return forecast_tracking.score(log, history)
+
+
+@app.get("/api/account/advanced")
+def api_account_advanced(request: Request, alternatives: bool = Query(default=False)):
+    _require_local(request)
+    return pipeline.advanced(_analysis_or_404(), alternatives)
+
+
+@app.get("/api/account/autosync")
+def api_account_autosync(request: Request):
+    _require_local(request)
+    tail = []
+    if os.path.isfile(autosync.LOG):
+        with open(autosync.LOG, encoding="utf-8", errors="replace") as f:
+            tail = f.read().splitlines()[-5:]
+    return {"installed": autosync.installed(), "times": [f"{h:02d}:{m:02d}" for h, m in autosync.TIMES],
+            "telegram_configured": bool(os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID")),
+            "log": tail}
+
+
+class AutosyncRequest(BaseModel):
+    enable: bool
+
+
+@app.post("/api/account/autosync")
+def api_account_autosync_set(req: AutosyncRequest, request: Request):
+    _require_local(request)
+    try:
+        autosync.install() if req.enable else autosync.uninstall()
+    except Exception as e:
+        raise _bad_request(e)
+    return api_account_autosync(request)
+
+
+@app.post("/api/account/notify/test")
+def api_account_notify_test(request: Request):
+    _require_local(request)
+    return notify.deliver([{"id": "test", "text": "✅ TraderAI: thông báo thử nghiệm hoạt động."}])
 
 
 @app.post("/api/account/review")
