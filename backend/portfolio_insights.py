@@ -28,11 +28,32 @@ CORP_KEYWORDS = ("cổ tức", "chốt quyền", "ngày đăng ký cuối cùng"
 
 # ---------- trade journal ----------
 
+TRADE_TAGS = ("Breakout / vượt đỉnh", "Mua hỗ trợ / bắt đáy", "Tin tức / sự kiện", "Cơ bản / định giá",
+              "Theo khuyến nghị", "Cảm tính / FOMO", "Cắt lỗ theo kế hoạch", "Chốt lời theo kế hoạch", "Khác")
+
+
 def load_journal() -> Dict[str, Any]:
     j = ta._read_json(JOURNAL_FILE) or {}
     j.setdefault("trades", {})
     j.setdefault("last_cost", {})
+    j.setdefault("notes", {})
     return j
+
+
+def set_note(key: str, tag: Optional[str], note: str) -> Dict[str, Any]:
+    """Attach a reason tag and a free-text note to a journaled trade."""
+    journal = load_journal()
+    if key not in journal["trades"]:
+        raise KeyError("Không tìm thấy giao dịch trong nhật ký.")
+    if tag and tag not in TRADE_TAGS:
+        raise ValueError("Nhãn lý do không hợp lệ.")
+    note = (note or "").strip()[:300]
+    if tag or note:
+        journal["notes"][key] = {"tag": tag or None, "note": note}
+    else:
+        journal["notes"].pop(key, None)
+    ta._write_private(JOURNAL_FILE, journal)
+    return journal["notes"].get(key, {})
 
 
 def merge_trades(journal: Dict[str, Any], snapshot: Dict[str, Any]) -> int:
@@ -78,7 +99,11 @@ def journal_stats(journal: Dict[str, Any]) -> Dict[str, Any]:
     """Realized P&L (after sell fee + tax), win rate, profit factor and FIFO holding time."""
     fees = fee_config()
     keep = 1 - fees["sell_fee"] - fees["sell_tax"]
-    trades = sorted(journal.get("trades", {}).values(), key=lambda t: (t["date"], t.get("time", "")))
+    notes = journal.get("notes", {})
+    keyed = sorted(journal.get("trades", {}).items(), key=lambda kv: (kv[1]["date"], kv[1].get("time", "")))
+    trades = [t for _, t in keyed]
+    last_tag: Dict[str, str] = {}              # ticker -> latest tagged buy's reason
+    by_tag: Dict[str, List[float]] = {}
     lots: Dict[str, List[List[Any]]] = {}      # ticker -> FIFO [qty, date] of journaled buys
     per_ticker: Dict[str, Dict[str, float]] = {}
     monthly: Dict[str, float] = {}
@@ -86,9 +111,12 @@ def journal_stats(journal: Dict[str, Any]) -> Dict[str, Any]:
     hold_days: List[Tuple[float, float]] = []   # (days, qty)
     unknown_basis = 0
 
-    for t in trades:
+    for key, t in keyed:
+        tag = (notes.get(key) or {}).get("tag")
         if t["side"] == "B":
             lots.setdefault(t["ticker"], []).append([t["qty"], t["date"]])
+            if tag:
+                last_tag[t["ticker"]] = tag
             continue
         basis = t.get("cost_basis")
         if not basis:
@@ -96,8 +124,12 @@ def journal_stats(journal: Dict[str, Any]) -> Dict[str, Any]:
             continue
         pnl = t["qty"] * (t["price"] * keep - basis)
         pct = (t["price"] * keep / basis - 1) * 100
-        closed.append({"date": t["date"], "ticker": t["ticker"], "qty": int(t["qty"]), "price": round(t["price"]),
-                       "cost_basis": round(basis), "pnl": round(pnl), "pnl_pct": round(pct, 2)})
+        # A sell is judged by why the position was opened, unless the sell itself carries a reason.
+        reason = last_tag.get(t["ticker"]) or tag
+        if reason:
+            by_tag.setdefault(reason, []).append(pct)
+        closed.append({"key": key, "date": t["date"], "ticker": t["ticker"], "qty": int(t["qty"]), "price": round(t["price"]),
+                       "cost_basis": round(basis), "pnl": round(pnl), "pnl_pct": round(pct, 2), "reason": reason})
         pt = per_ticker.setdefault(t["ticker"], {"ticker": t["ticker"], "pnl": 0.0, "sells": 0})
         pt["pnl"] += pnl
         pt["sells"] += 1
@@ -133,6 +165,11 @@ def journal_stats(journal: Dict[str, Any]) -> Dict[str, Any]:
         "monthly": [{"month": k, "pnl": round(v)} for k, v in sorted(monthly.items())],
         "recent_closed": closed[-10:][::-1],
         "unknown_basis_sells": unknown_basis,
+        "by_reason": sorted(({"reason": k, "closed": len(v), "win_rate_pct": round(sum(1 for x in v if x > 0) / len(v) * 100, 1),
+                              "avg_pnl_pct": round(sum(v) / len(v), 2)} for k, v in by_tag.items()), key=lambda r: -r["avg_pnl_pct"]),
+        "recent_trades": [{"key": k, **{f: t[f] for f in ("date", "ticker", "side", "qty", "price")},
+                           "qty": int(t["qty"]), "price": round(t["price"]), **(notes.get(k) or {})} for k, t in keyed[-30:][::-1]],
+        "tags": list(TRADE_TAGS),
     }
 
 

@@ -12,8 +12,11 @@ type Insights = {
     since: string | null; trade_count: number; buys: number; sells: number; realized_pnl: number;
     win_rate_pct: number | null; avg_win_pct: number | null; avg_loss_pct: number | null; profit_factor: number | null; avg_holding_days: number | null;
     by_ticker: Array<{ ticker: string; pnl: number; sells: number }>; monthly: Array<{ month: string; pnl: number }>;
-    recent_closed: Array<{ date: string; ticker: string; qty: number; price: number; cost_basis: number; pnl: number; pnl_pct: number }>;
+    recent_closed: Array<{ key: string; date: string; ticker: string; qty: number; price: number; cost_basis: number; pnl: number; pnl_pct: number; reason?: string | null }>;
     unknown_basis_sells: number;
+    by_reason: Array<{ reason: string; closed: number; win_rate_pct: number; avg_pnl_pct: number }>;
+    recent_trades: Array<{ key: string; date: string; ticker: string; side: 'B' | 'S'; qty: number; price: number; tag?: string | null; note?: string }>;
+    tags: string[];
   };
 };
 
@@ -84,6 +87,144 @@ async function loadForecast() {
   }
 }
 
+type Risk = {
+  risk_pct: number;
+  sizing: Array<{ ticker: string; held: number; suggested: number; stop: number; current_risk_pct_nav: number; delta: number; limited_by: string }>;
+  risk_parity: { rows: Array<{ ticker: string; weight_pct: number; risk_share_pct: number; erc_weight_pct: number; vol_annual_pct: number }>; vol_now_pct: number; vol_erc_pct: number; note: string } | null;
+  stress: Array<{ scenario: string; vnindex_pct: number; portfolio_pct: number; loss: number; rows: Array<{ ticker: string; move_pct: number; source: string }> }>;
+  vol_spikes: Array<{ ticker: string; ratio: number; text: string }>;
+  backtests: Record<string, { rules: Array<{ label: string; entries: number; avg_return_pct: number; median_return_pct: number; win_rate_pct: number; worst_pct: number; p10_pct: number }>; best: string } | null>;
+};
+
+let riskPct = 1;
+
+function renderRisk(r: Risk): string {
+  const sizing = r.sizing.map(z => `<tr><td><strong>${esc(z.ticker)}</strong></td><td>${vnd(z.held)}</td><td>${vnd(z.suggested)}</td><td>${z.delta === 0 ? '—' : z.delta > 0 ? `<span class="positive">+${vnd(z.delta)}</span>` : `<span class="negative">${vnd(z.delta)}</span>`}</td><td>${vnd(z.stop)}</td><td class="${z.current_risk_pct_nav > r.risk_pct * 1.5 ? 'negative' : ''}">${z.current_risk_pct_nav}%</td><td>${esc(z.limited_by || '')}</td></tr>`).join('');
+  const rp = r.risk_parity;
+  const rpRows = rp ? rp.rows.map(x => `<tr><td><strong>${esc(x.ticker)}</strong></td><td>${x.weight_pct}%</td><td class="${x.risk_share_pct > x.weight_pct * 1.3 ? 'negative' : ''}">${x.risk_share_pct}%</td><td>${x.erc_weight_pct}%</td><td>${x.vol_annual_pct}%</td></tr>`).join('') : '';
+  const stress = r.stress.map(x => `<tr><td>${esc(x.scenario)}</td><td>${pct(x.vnindex_pct, 1)}</td><td>${pct(x.portfolio_pct, 1)}</td><td><span class="${x.loss >= 0 ? 'positive' : 'negative'}">${vnd(x.loss)} đ</span></td><td class="stress-detail">${x.rows.map(m => `${esc(m.ticker)} ${m.move_pct > 0 ? '+' : ''}${m.move_pct}%${m.source !== 'thực tế' ? '*' : ''}`).join(' · ')}</td></tr>`).join('');
+  const bt = Object.entries(r.backtests).filter(([, b]) => b).map(([t, b]) => `<tr><td rowspan="${b!.rules.length}"><strong>${esc(t)}</strong></td>${b!.rules.map((x, i) => `${i ? '<tr>' : ''}<td>${esc(x.label)}${x.label === b!.best ? ' ✓' : ''}</td><td>${pct(x.avg_return_pct)}</td><td>${x.win_rate_pct}%</td><td>${pct(x.p10_pct, 1)}</td><td>${pct(x.worst_pct, 1)}</td></tr>`).join('')}`).join('');
+  return `
+    ${r.vol_spikes.map(v => `<p class="tcbs-flag high">${esc(v.text)}</p>`).join('')}
+    <div class="plan-head"><strong>Định cỡ vị thế</strong><form id="riskPctForm" class="plan-goal">Rủi ro tối đa mỗi mã <input id="riskPctInput" type="number" min="0.25" max="10" step="0.25" value="${r.risk_pct}" aria-label="Rủi ro mỗi mã % NAV">% NAV <button class="btn-ghost" type="submit">Tính lại</button></form></div>
+    <div class="portfolio-table-wrap"><table class="portfolio-table"><thead><tr><th>Mã</th><th>Đang giữ</th><th>Đề xuất</th><th>Chênh lệch</th><th>Stop dùng</th><th>Rủi ro hiện tại/NAV</th><th>Giới hạn bởi</th></tr></thead><tbody>${sizing}</tbody></table></div>
+    <p class="form-hint">Số cổ phiếu sao cho nếu chạm stop thì chỉ mất ${r.risk_pct}% NAV (trần 25% NAV/mã). Không có stop thì dùng stop theo biến động GARCH (2 độ lệch chuẩn của 10 phiên).</p>
+    ${rp ? `<strong>Đóng góp rủi ro (risk parity)</strong>
+    <div class="portfolio-table-wrap"><table class="portfolio-table"><thead><tr><th>Mã</th><th>Tỷ trọng vốn</th><th>Tỷ trọng rủi ro</th><th>Tỷ trọng cân bằng rủi ro</th><th>Biến động/năm</th></tr></thead><tbody>${rpRows}</tbody></table></div>
+    <p class="form-hint">Biến động phần cổ phiếu: hiện tại ${rp.vol_now_pct}%/năm → ${rp.vol_erc_pct}%/năm nếu chia theo cân bằng rủi ro (mỗi mã góp rủi ro bằng nhau). ${esc(rp.note)}</p>` : ''}
+    <strong>Stress test</strong>
+    <div class="portfolio-table-wrap"><table class="portfolio-table"><thead><tr><th>Kịch bản</th><th>VN-Index</th><th>Danh mục</th><th>Lãi/lỗ</th><th>Từng mã</th></tr></thead><tbody>${stress}</tbody></table></div>
+    <p class="form-hint">Giả sử cú sập lặp lại với danh mục hôm nay, dùng biến động giá thật của từng mã (* = mã chưa niêm yết lúc đó, ước tính theo beta). Tiền mặt không đổi.</p>
+    ${bt ? `<strong>Backtest quy tắc thoát lệnh (3 năm, vào lệnh mỗi tuần, đã gồm phí)</strong>
+    <div class="portfolio-table-wrap"><table class="portfolio-table"><thead><tr><th>Mã</th><th>Quy tắc</th><th>Lợi nhuận TB</th><th>Tỷ lệ thắng</th><th>10% tệ nhất</th><th>Tệ nhất</th></tr></thead><tbody>${bt}</tbody></table></div>
+    <p class="form-hint">✓ = quy tắc cho lợi nhuận trung bình cao nhất trên chính mã đó. Cắt lỗ thường giảm lỗ tệ nhất nhưng có thể cắt mất nhịp hồi — xem cả hai cột.</p>` : ''}`;
+}
+
+async function loadRisk() {
+  const box = $('insightRisk');
+  if (!box) return;
+  box.innerHTML = '<p class="form-hint">Đang tính định cỡ vị thế, risk parity, stress test và backtest (5 năm dữ liệu)…</p>';
+  try {
+    const res = await fetch(`/api/account/risk?riskPct=${riskPct}`);
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body?.detail?.message || body?.detail || `HTTP ${res.status}`);
+    box.innerHTML = renderRisk(body as Risk);
+    box.querySelector<HTMLFormElement>('#riskPctForm')?.addEventListener('submit', event => {
+      event.preventDefault();
+      const v = Number($<HTMLInputElement>('riskPctInput')!.value);
+      if (v > 0 && v <= 10) { riskPct = v; loadRisk(); }
+    });
+  } catch (e) {
+    box.innerHTML = `<p class="form-hint negative">Không tính được phần rủi ro: ${esc((e as Error).message)}</p>`;
+  }
+}
+
+/** Minimal Markdown → HTML for our own reports: headings, lists, checkboxes, tables, bold, italics. */
+function markdownToHtml(md: string): string {
+  const inline = (t: string) => esc(t).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/_(.+?)_/g, '<em>$1</em>');
+  const out: string[] = [];
+  let list = false;
+  let table: string[][] = [];
+  const flush = () => {
+    if (list) { out.push('</ul>'); list = false; }
+    if (table.length) {
+      const [head, ...body] = table;
+      out.push(`<div class="portfolio-table-wrap"><table class="portfolio-table"><thead><tr>${head.map(c => `<th>${inline(c)}</th>`).join('')}</tr></thead><tbody>${body.map(r => `<tr>${r.map(c => `<td>${inline(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`);
+      table = [];
+    }
+  };
+  for (const line of md.split('\n')) {
+    if (line.startsWith('|')) {
+      if (list) { out.push('</ul>'); list = false; }
+      if (!/^\|(\s*-+\s*\|)+$/.test(line.replace(/---/g, '-'))) table.push(line.split('|').slice(1, -1).map(c => c.trim()));
+      continue;
+    }
+    if (table.length) flush();
+    const h = line.match(/^(#{1,3}) (.*)/);
+    if (h) { flush(); out.push(`<h${h[1].length + 2}>${inline(h[2])}</h${h[1].length + 2}>`); continue; }
+    const li = line.match(/^- (\[ \] )?(.*)/);
+    if (li) { if (!list) { out.push('<ul>'); list = true; } out.push(`<li>${li[1] ? '☐ ' : ''}${inline(li[2])}</li>`); continue; }
+    flush();
+    if (line.trim()) out.push(`<p>${inline(line)}</p>`);
+  }
+  flush();
+  return out.join('');
+}
+
+function downloadMarkdown(name: string, md: string) {
+  const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `traderai-bao-cao-${name}.md`; a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function showReport(name: string) {
+  const out = $('reportOut');
+  if (!out) return;
+  const res = await fetch(`/api/account/reports/${encodeURIComponent(name)}`);
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) { out.innerHTML = `<p class="form-hint negative">${esc(body?.detail?.message || 'Không mở được báo cáo')}</p>`; return; }
+  out.innerHTML = `<div class="report-view">${markdownToHtml(body.markdown)}</div><button class="btn-ghost" type="button" id="reportDownload">Tải file .md</button>`;
+  $('reportDownload')?.addEventListener('click', () => downloadMarkdown(name, body.markdown));
+}
+
+async function generateReport(auto = false) {
+  const status = $('reportStatus');
+  const btn = $<HTMLButtonElement>('reportMake');
+  if (status) status.textContent = auto ? ' Cuối tuần rồi — đang tự tạo báo cáo tuần…' : ' Đang tạo báo cáo…';
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch('/api/account/report', { method: 'POST' });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body?.detail?.message || `HTTP ${res.status}`);
+    if (status) status.textContent = ` Đã lưu báo cáo ${body.name}.`;
+    await loadReports(false);
+    showReport(body.name);
+  } catch (e) {
+    if (status) status.textContent = ` Không tạo được báo cáo: ${(e as Error).message}`;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function loadReports(allowAuto = true) {
+  const list = $('reportList');
+  if (!list) return;
+  try {
+    const res = await fetch('/api/account/reports');
+    const body = await res.json();
+    const reports: Array<{ name: string; updated_at: string }> = body.reports || [];
+    list.innerHTML = reports.length ? reports.map(r => `<button class="btn-ghost report-chip" type="button" data-report="${esc(r.name)}">${esc(r.name)}</button>`).join('') : '<span class="form-hint">Chưa có báo cáo nào.</span>';
+    list.querySelectorAll<HTMLElement>('[data-report]').forEach(b => b.addEventListener('click', () => showReport(b.dataset.report!)));
+    // Weekly and automatic: from Friday on, the first visit of the week writes that week's report.
+    const weekend = [5, 6, 0].includes(new Date().getDay());
+    if (allowAuto && weekend && !reports.some(r => r.name === body.current_week)) generateReport(true);
+  } catch {
+    list.innerHTML = '<span class="form-hint negative">Không đọc được danh sách báo cáo.</span>';
+  }
+}
+
 let insightsKey = '';
 let tickers: string[] = [];
 let councilCancelled = false;
@@ -99,7 +240,10 @@ function renderJournal(j: Insights['journal']): string {
   if (!j.trade_count) {
     return `<p class="form-hint">TCBS chỉ trả lệnh khớp trong ngày, nên app tự ghi nhật ký mỗi lần đồng bộ. Hãy đồng bộ vào cuối mỗi phiên có giao dịch để tích lũy lãi/lỗ đã chốt, tỷ lệ thắng và thời gian nắm giữ.</p>`;
   }
-  const closed = j.recent_closed.map(c => `<tr><td>${esc(c.date)}</td><td><strong>${esc(c.ticker)}</strong></td><td>${vnd(c.qty)}</td><td>${vnd(c.cost_basis)} → ${vnd(c.price)}</td><td><span class="${c.pnl >= 0 ? 'positive' : 'negative'}">${c.pnl >= 0 ? '+' : ''}${vnd(c.pnl)}</span> (${pct(c.pnl_pct)})</td></tr>`).join('');
+  const closed = j.recent_closed.map(c => `<tr><td>${esc(c.date)}</td><td><strong>${esc(c.ticker)}</strong></td><td>${vnd(c.qty)}</td><td>${vnd(c.cost_basis)} → ${vnd(c.price)}</td><td><span class="${c.pnl >= 0 ? 'positive' : 'negative'}">${c.pnl >= 0 ? '+' : ''}${vnd(c.pnl)}</span> (${pct(c.pnl_pct)})</td><td>${esc(c.reason || '—')}</td></tr>`).join('');
+  const reasons = j.by_reason.map(r => `<tr><td>${esc(r.reason)}</td><td>${r.closed}</td><td>${r.win_rate_pct}%</td><td>${pct(r.avg_pnl_pct)}</td></tr>`).join('');
+  const options = (sel?: string | null) => `<option value="">— lý do —</option>${j.tags.map(t => `<option${t === sel ? ' selected' : ''}>${esc(t)}</option>`).join('')}`;
+  const tagRows = j.recent_trades.map(t => `<tr data-trade="${esc(t.key)}"><td>${esc(t.date)}</td><td><strong>${esc(t.ticker)}</strong></td><td class="${t.side === 'B' ? 'positive' : 'negative'}">${t.side === 'B' ? 'Mua' : 'Bán'} ${vnd(t.qty)} @ ${vnd(t.price)}</td><td><select class="note-tag" aria-label="Lý do">${options(t.tag)}</select></td><td><input class="note-text" maxlength="300" value="${esc(t.note || '')}" placeholder="Ghi chú" aria-label="Ghi chú"></td><td><button class="table-action" type="button" data-note-save>Lưu</button></td></tr>`).join('');
   return `
     <div class="portfolio-summary tcbs-summary">
       <div><span>Lãi/lỗ đã chốt (sau phí, thuế)</span><strong><span class="${j.realized_pnl >= 0 ? 'positive' : 'negative'}">${j.realized_pnl >= 0 ? '+' : ''}${vnd(j.realized_pnl)} đ</span></strong><small>từ ${esc(j.since || '')} · ${j.buys} lệnh mua, ${j.sells} lệnh bán</small></div>
@@ -107,7 +251,9 @@ function renderJournal(j: Insights['journal']): string {
       <div><span>Profit factor</span><strong>${j.profit_factor ?? '—'}</strong><small>tổng lãi / tổng lỗ (&gt;1.5 là tốt)</small></div>
       <div><span>Thời gian nắm giữ TB</span><strong>${j.avg_holding_days != null ? `${j.avg_holding_days} ngày` : '—'}</strong><small>theo các lệnh mua đã ghi nhật ký</small></div>
     </div>
-    ${closed ? `<div class="portfolio-table-wrap"><table class="portfolio-table"><thead><tr><th>Ngày</th><th>Mã</th><th>SL bán</th><th>Giá vốn → bán</th><th>Lãi/lỗ</th></tr></thead><tbody>${closed}</tbody></table></div>` : ''}
+    ${closed ? `<div class="portfolio-table-wrap"><table class="portfolio-table"><thead><tr><th>Ngày</th><th>Mã</th><th>SL bán</th><th>Giá vốn → bán</th><th>Lãi/lỗ</th><th>Lý do mua</th></tr></thead><tbody>${closed}</tbody></table></div>` : ''}
+    ${reasons ? `<strong>Hiệu quả theo lý do vào lệnh</strong><div class="portfolio-table-wrap"><table class="portfolio-table"><thead><tr><th>Lý do</th><th>Số lệnh đóng</th><th>Tỷ lệ thắng</th><th>Lãi/lỗ TB</th></tr></thead><tbody>${reasons}</tbody></table></div>` : ''}
+    ${tagRows ? `<strong>Gắn lý do cho giao dịch</strong><p class="form-hint">Lệnh bán được tính theo lý do của lệnh mua gần nhất cùng mã. Sau vài chục lệnh bạn sẽ thấy kiểu vào lệnh nào thật sự hiệu quả.</p><div class="portfolio-table-wrap"><table class="portfolio-table note-table"><thead><tr><th>Ngày</th><th>Mã</th><th>Lệnh</th><th>Lý do</th><th>Ghi chú</th><th></th></tr></thead><tbody>${tagRows}</tbody></table></div>` : ''}
     ${j.unknown_basis_sells ? `<p class="form-hint">${j.unknown_basis_sells} lệnh bán chưa rõ giá vốn (bán trước khi app kịp ghi nhận vị thế) nên không tính vào lãi/lỗ.</p>` : ''}`;
 }
 
@@ -127,6 +273,11 @@ function render(data: Insights) {
     <section class="insight-block">
       <h4>Dự báo định lượng</h4>
       <div id="insightForecast"></div>
+    </section>
+
+    <section class="insight-block">
+      <h4>Quản trị rủi ro</h4>
+      <div id="insightRisk"></div>
     </section>
 
     <section class="insight-block">
@@ -158,6 +309,14 @@ function render(data: Insights) {
     </section>
 
     <section class="insight-block">
+      <h4>Báo cáo tuần</h4>
+      <p class="plan-note">Tổng hợp NAV, lãi/lỗ, cảnh báo, rủi ro, sự kiện và việc cần làm. Từ thứ Sáu, lần mở app đầu tiên trong tuần sẽ tự tạo báo cáo; file lưu trong runtime/reports/.</p>
+      <div class="plan-alerts"><button class="btn-ghost" id="reportMake" type="button">Tạo báo cáo tuần này</button><span id="reportStatus" class="form-hint"></span></div>
+      <div id="reportList" class="report-list"></div>
+      <div id="reportOut"></div>
+    </section>
+
+    <section class="insight-block">
       <h4>Hội đồng AI cho toàn danh mục</h4>
       <p class="plan-note">Chạy Hội đồng AI (kỹ thuật, cơ bản, tin tức, tranh biện Bò/Gấu, CIO) lần lượt cho từng mã đang nắm. Mỗi mã mất khoảng 30–90 giây khi dùng LLM.</p>
       <div class="plan-alerts"><button class="btn-ghost" id="councilAllRun" type="button">Chạy cho ${tickers.length} mã</button><button class="btn-ghost" id="councilAllStop" type="button" hidden>Dừng</button><span id="councilAllStatus" class="form-hint"></span></div>
@@ -166,7 +325,19 @@ function render(data: Insights) {
   box.hidden = false;
   $('councilAllRun')?.addEventListener('click', runCouncilAll);
   $('councilAllStop')?.addEventListener('click', () => { councilCancelled = true; });
+  $('reportMake')?.addEventListener('click', () => generateReport());
+  box.querySelectorAll<HTMLElement>('[data-note-save]').forEach(btn => btn.addEventListener('click', async () => {
+    const row = btn.closest<HTMLElement>('tr[data-trade]');
+    if (!row) return;
+    const tag = row.querySelector<HTMLSelectElement>('.note-tag')!.value || null;
+    const note = row.querySelector<HTMLInputElement>('.note-text')!.value;
+    const res = await fetch('/api/account/journal/note', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: row.dataset.trade, tag, note }) });
+    btn.textContent = res.ok ? 'Đã lưu' : 'Lỗi';
+    setTimeout(() => { btn.textContent = 'Lưu'; }, 1500);
+  }));
   loadForecast();
+  loadRisk();
+  loadReports();
 }
 
 const ACTION_CLASS: Record<string, string> = { MUA: 'info', 'BÁN': 'high', 'QUAN SÁT': 'medium' };

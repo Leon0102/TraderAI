@@ -195,6 +195,8 @@ import tcbs_account  # noqa: E402
 import portfolio_plan  # noqa: E402
 import portfolio_insights  # noqa: E402
 import forecast  # noqa: E402
+import risk_tools  # noqa: E402
+import weekly_report  # noqa: E402
 from agents.llm import call_llm, normalize_provider, resolve_api_key, LLMError  # noqa: E402
 from agents.prompts import PORTFOLIO_REVIEW_PROMPT, GROUNDING_RULES  # noqa: E402
 
@@ -291,18 +293,88 @@ def api_account_insights(request: Request):
     return portfolio_insights.build_insights(analysis, market, index_closes, companies, news)
 
 
+def _forecasts(plan, history):
+    """Forecast every position; `history` is {ticker: [(date, close)]} including VNINDEX."""
+    index = [c for _, c in history.get("VNINDEX", [])]
+    out = {}
+    for p in plan["positions"]:
+        levels = {"breakeven": p["breakeven"], "stop_loss": p.get("stop_loss"), "target": p.get("target")}
+        out[p["ticker"]] = forecast.forecast_ticker([c for _, c in history.get(p["ticker"], [])], index, levels)
+    return out
+
+
+def _risk_context(analysis, risk_pct: float = 1.0):
+    """Plan, 5-year history, forecasts, betas and risk tools in one pass (shared by risk + report)."""
+    plan = _build_plan(analysis)
+    tickers = [h["ticker"] for h in analysis["holdings"]]
+    history = risk_tools.fetch_dated_history(tickers + ["VNINDEX"])
+    forecasts = _forecasts(plan, history)
+    bench = portfolio_insights.benchmark(analysis["holdings"], {t: {"closes": history.get(t, [])} for t in tickers},
+                                         history.get("VNINDEX", []), analysis["summary"]["nav"])
+    betas = {row["ticker"]: row["beta"] for row in bench["stocks"]}
+    risk = risk_tools.build_risk(analysis, plan, history, forecasts, betas, risk_pct)
+    return plan, forecasts, risk
+
+
 @app.get("/api/account/forecast")
 def api_account_forecast(request: Request):
     _require_local(request)
     analysis = _analysis_or_404()
-    plan = _build_plan(analysis)
+    history = risk_tools.fetch_dated_history([h["ticker"] for h in analysis["holdings"]] + ["VNINDEX"], years=3)
+    return {"forecasts": _forecasts(_build_plan(analysis), history),
+            "method": "GARCH(1,1) + Filtered Historical Simulation (stationary bootstrap), walk-forward validated"}
+
+
+@app.get("/api/account/risk")
+def api_account_risk(request: Request, riskPct: float = Query(default=1.0, gt=0, le=10)):
+    _require_local(request)
+    _, _, risk = _risk_context(_analysis_or_404(), riskPct)
+    return risk
+
+
+class TradeNoteRequest(BaseModel):
+    key: str = Field(max_length=200)
+    tag: Optional[str] = None
+    note: str = Field(default="", max_length=300)
+
+
+@app.post("/api/account/journal/note")
+def api_account_journal_note(req: TradeNoteRequest, request: Request):
+    _require_local(request)
+    try:
+        return portfolio_insights.set_note(req.key, req.tag, req.note)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail={"message": str(e.args[0]), "needs_login": False})
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail={"message": str(e), "needs_login": False})
+
+
+@app.post("/api/account/report")
+def api_account_report(request: Request):
+    _require_local(request)
+    analysis = _analysis_or_404()
+    plan, forecasts, risk = _risk_context(analysis)
     tickers = [h["ticker"] for h in analysis["holdings"]]
-    history = forecast.fetch_long_history(tickers + ["VNINDEX"])
-    out = {}
-    for p in plan["positions"]:
-        levels = {"breakeven": p["breakeven"], "stop_loss": p.get("stop_loss"), "target": p.get("target")}
-        out[p["ticker"]] = forecast.forecast_ticker(history.get(p["ticker"], []), history.get("VNINDEX"), levels)
-    return {"forecasts": out, "method": "GARCH(1,1) + Filtered Historical Simulation (stationary bootstrap), walk-forward validated"}
+    market = portfolio_plan.fetch_market_data(tickers)
+    index_closes, companies, news = portfolio_insights.fetch_insight_data(tickers)
+    insights = portfolio_insights.build_insights(analysis, market, index_closes, companies, news)
+    markdown = weekly_report.build_report(analysis, plan, insights, forecasts, risk)
+    return {"name": weekly_report.save_report(markdown), "markdown": markdown}
+
+
+@app.get("/api/account/reports")
+def api_account_reports(request: Request):
+    _require_local(request)
+    return {"reports": weekly_report.list_reports(), "current_week": weekly_report.week_id()}
+
+
+@app.get("/api/account/reports/{name}")
+def api_account_report_get(name: str, request: Request):
+    _require_local(request)
+    markdown = weekly_report.read_report(name)
+    if markdown is None:
+        raise HTTPException(status_code=404, detail={"message": "Không có báo cáo này.", "needs_login": False})
+    return {"name": name, "markdown": markdown}
 
 
 @app.post("/api/account/review")
