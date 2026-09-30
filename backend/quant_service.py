@@ -51,7 +51,7 @@ def _compute_scores() -> Dict[str, Any]:
     raw = {}
     for t in liquid:
         u = uni.get(t) or {}
-        f = sc.factors(stmts.get(t, []), panel.get(t, []), today, bool(u.get("is_bank")), u.get("shares"))
+        f = sc.factors(stmts.get(t, []), panel.get(t, []), today, bool(u.get("is_bank")), u.get("shares"), min_prices=5)
         if f:
             raw[t] = f
     graded = sc.grade_universe(raw, {t: (uni.get(t) or {}).get("sector") for t in raw})
@@ -156,6 +156,29 @@ def brief_for_llm(ticker: str) -> Optional[str]:
         parts.append("Kiểm định walk-forward trên TTCK VN (nhóm 20% tốt nhất so với trung bình, sau phí): "
                      + "; ".join(f"{r['label']}: {r['verdict'].lower()}" for r in results) + ".")
     return " ".join(parts)
+
+
+def local_finance(ticker: str) -> Optional[Dict[str, Any]]:
+    """/api/finance-shaped fundamentals computed from stored statements (same fields as the Vietcap path)."""
+    s = scores()
+    t = ticker.upper()
+    f = s["raw"].get(t)
+    if not f:
+        return None
+    u = s["universe"].get(t) or {}
+    pct = lambda v: round(v * 100, 2) if v is not None else 0  # noqa: E731
+    l2a = f.get("liabilities_to_assets")
+    ey, bp = f.get("earnings_yield"), f.get("book_to_price")
+    return {"ticker": t, "pe": round(1 / ey, 2) if ey and ey > 0 else 0, "pb": round(1 / bp, 2) if bp and bp > 0 else 0,
+            "roe": pct(f.get("roe")), "eps": round(f["eps"], 2) if f.get("eps") is not None else 0, "revenue": 0,
+            "revenueGrowth": pct(f.get("revenue_growth")), "epsGrowth": pct(f.get("earnings_growth")),
+            "marketCap": round(f["market_cap"] / 1e9, 2),
+            "dividendYield": round((u.get("dps") or 0) / f["price"] * 100, 2) if f["price"] else 0,
+            "debtOnEquity": round(l2a / (1 - l2a), 2) if l2a is not None and l2a < 1 else 0,
+            "netMargin": pct(f.get("net_margin")), "freeCashFlow": 0, "totalAssets": 0,
+            "interestCoverage": round(f["interest_coverage"], 2) if f.get("interest_coverage") is not None else 0,
+            "currentRatio": round(f["current_ratio"], 2) if f.get("current_ratio") is not None else 0,
+            "industry": u.get("sector") or ""}
 
 
 # ---------- validation ----------

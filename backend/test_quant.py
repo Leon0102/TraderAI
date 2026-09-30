@@ -81,12 +81,11 @@ def test_dcf_basics():
     assert sc.dcf(ann, "2025-06-01", 20_000, 1e7, 1.0, 0.3, is_bank=True)["applicable"] is False
 
 
-def _synthetic_market(n=40, months=30, seed=3):
+def _synthetic_market(n=40, months=30, seed=3, start=date(2023, 1, 2)):
     """Stocks whose earnings yield truly drives next-month returns; everything else is noise."""
     rng = random.Random(seed)
     tickers = [f"S{i:02d}" for i in range(n)]
     ey = {t: rng.uniform(0.02, 0.2) for t in tickers}
-    start = date(2023, 1, 2)
     days = [start + timedelta(days=i) for i in range(int(months * 30.5))]
     days = [d for d in days if d.weekday() < 5]
     for t in tickers:
@@ -173,6 +172,25 @@ def test_market_views_on_synthetic_data():
     assert all(s["quadrant"] in ("DẪN DẮT", "SUY YẾU", "TỤT HẬU", "CẢI THIỆN") for s in rot["sectors"])
     v = mv.valuation_band(panel, db.statements())
     assert v["stats"] and v["stats"]["now"] > 0
+
+
+def test_local_finance_matches_statements():
+    import quant_service as q
+    db.reset_for_tests(os.path.join(TMP, "finance.db"))
+    _synthetic_market(n=8, months=30, seed=5, start=date.today() - timedelta(days=int(30 * 30.5)))
+    q.invalidate()
+    fin = None
+    import market_ingest
+    original = market_ingest.liquid_tickers
+    market_ingest.liquid_tickers = lambda min_value=1_000_000_000: [f"S{i:02d}" for i in range(8)]
+    try:
+        fin = q.local_finance("S03")
+        assert q.local_finance("NOPE") is None
+    finally:
+        market_ingest.liquid_tickers = original
+        q.invalidate()
+    assert fin["ticker"] == "S03" and fin["pe"] > 0 and fin["pb"] > 0 and fin["roe"] > 0
+    assert set(fin) >= {"pe", "pb", "roe", "eps", "revenueGrowth", "epsGrowth", "marketCap", "dividendYield", "debtOnEquity", "netMargin", "currentRatio"}
 
 
 def test_regression_recovers_beta():

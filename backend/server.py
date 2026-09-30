@@ -132,7 +132,18 @@ def api_history(
 
 @app.get("/api/finance")
 def api_finance(ticker: str = Query(...)):
-    return get_finance(ticker)
+    result = get_finance(ticker)
+    if result.get("source") == "error" or not result.get("data"):
+        # Vietcap/TCBS gave nothing (e.g. no ratio row for this ticker): compute from our own
+        # database of published statements instead of dropping to demo data.
+        try:
+            import quant_service
+            local = quant_service.local_finance(ticker)
+        except Exception:
+            local = None
+        if local:
+            return {"data": local, "source": "local"}
+    return result
 
 
 @app.get("/api/listing")
@@ -277,6 +288,15 @@ from agents.prompts import PORTFOLIO_REVIEW_PROMPT, GROUNDING_RULES  # noqa: E40
 _LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost"}
 # Self-hosted behind the password gate: the site's own hostname(s) may call account endpoints.
 _ALLOWED_ORIGIN_HOSTS = _LOCAL_HOSTS | {h.strip() for h in os.environ.get("ACCOUNT_ALLOWED_ORIGINS", "").split(",") if h.strip()}
+# Local-only DNS names that resolve to this machine: OrbStack containers (*.orb.local) and *.localhost.
+_LOCAL_SUFFIXES = (".orb.local", ".localhost")
+
+
+def _host_allowed(host: Optional[str]) -> bool:
+    """A hostname we serve: loopback, configured names, or a local-only suffix. Checking the Host
+    header too (not just Origin) is what stops DNS-rebinding pages from reading account data."""
+    host = (host or "").strip().lower().rstrip(".")
+    return bool(host) and (host in _ALLOWED_ORIGIN_HOSTS or host.endswith(_LOCAL_SUFFIXES))
 # Docker: requests reach the backend from the nginx container, not 127.0.0.1. docker-compose sets
 # ACCOUNT_TRUSTED_NETWORKS to its private bridge network and publishes ports on 127.0.0.1 only.
 _TRUSTED_NETS = [ipaddress.ip_network(n.strip()) for n in os.environ.get("ACCOUNT_TRUSTED_NETWORKS", "").split(",") if n.strip()]
@@ -297,8 +317,12 @@ def _require_local(request: Request) -> None:
     so reject callers from other machines and pages served from other sites."""
     client = request.client.host if request.client else ""
     origin = request.headers.get("origin")
-    if not _is_trusted_client(client) or (origin and urlparse(origin).hostname not in _ALLOWED_ORIGIN_HOSTS):
-        raise HTTPException(status_code=403, detail="Dữ liệu tài khoản TCBS chỉ truy cập được từ máy local.")
+    request_host = urlparse(f"//{request.headers.get('host', '')}").hostname
+    origin_host = urlparse(origin).hostname if origin else None
+    if not _is_trusted_client(client) or not _host_allowed(request_host) or (origin and not _host_allowed(origin_host)):
+        blocked = origin_host or request_host or client
+        raise HTTPException(status_code=403, detail=f"Dữ liệu tài khoản TCBS chỉ truy cập được từ máy local (bị chặn: {blocked}). "
+                                                    "Truy cập qua localhost, *.orb.local, hoặc thêm tên miền vào ACCOUNT_ALLOWED_ORIGINS.")
 
 
 def _tcbs_http_error(e: "tcbs_account.TcbsError") -> HTTPException:

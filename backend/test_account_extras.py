@@ -229,6 +229,34 @@ def test_alert_dedupe_and_contents():
     assert notify.send_telegram("x") == "not configured"
 
 
+def test_host_and_origin_guard():
+    import ipaddress
+    import server
+    from types import SimpleNamespace
+    server._TRUSTED_NETS = [ipaddress.ip_network("172.30.57.0/24")]  # what docker-compose sets
+    assert all(server._host_allowed(h) for h in ("localhost", "127.0.0.1", "::1", "frontend.traderai.orb.local", "app.localhost", "LOCALHOST."))
+    assert not any(server._host_allowed(h) for h in ("evil.example", "orb.local.evil.com", "notorb.local", "", None, "192.168.1.5"))
+
+    def req(client, host, origin=None):
+        headers = {"host": host}
+        if origin:
+            headers["origin"] = origin
+        return SimpleNamespace(client=SimpleNamespace(host=client), headers=headers)
+
+    def blocked(r):
+        try:
+            server._require_local(r)
+            return False
+        except Exception:
+            return True
+
+    assert not blocked(req("127.0.0.1", "localhost:8000", "http://localhost:5173"))
+    assert not blocked(req("172.30.57.4", "frontend.traderai.orb.local", "https://frontend.traderai.orb.local")), "OrbStack domain"
+    assert blocked(req("172.30.57.4", "frontend.traderai.orb.local", "https://evil.example")), "foreign page"
+    assert blocked(req("172.30.57.4", "evil.example", "http://evil.example")), "DNS rebinding: same-origin but unknown host"
+    assert blocked(req("8.8.8.8", "localhost:8000")), "remote client"
+
+
 def main():
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

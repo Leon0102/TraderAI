@@ -2,7 +2,7 @@
 // Vietnamese Stock Market Dashboard with Real-time Data & Investment Suggestions
 
 import './style.css';
-import { fetchMarketOverview, fetchTopStocks, fetchStockBars, fetchMultipleFinancials, fetchMarketAnalysis, fetchMarketNews, fetchMultipleTickerNews, getFeedProvenance, isAnyDataMock, withLiveBar } from './api/stockApi';
+import { fetchMarketOverview, fetchTopStocks, fetchStockBars, fetchMultipleFinancials, fetchMarketAnalysis, fetchMarketNews, fetchMultipleTickerNews, getFeedProvenance, isAnyDataMock, partialMockFeeds, withLiveBar } from './api/stockApi';
 import { renderMarketCards } from './components/marketOverview';
 import { renderSessionBand } from './components/sessionBand';
 import { initDailyPicks, setDailyPicks } from './components/dailyPicks';
@@ -253,7 +253,16 @@ function updateLastTime() {
 function updateDataSourceBadge() {
   const badge = document.getElementById('dataSourceBadge');
   if (!badge) return;
-  badge.style.display = isAnyDataMock() ? 'flex' : 'none';
+  const partial = partialMockFeeds();
+  const partialText = Object.entries(partial).map(([kind, tickers]) => `${({ finance: 'BCTC', history: 'giá lịch sử', news: 'tin tức' } as Record<string, string>)[kind] || kind}: ${tickers.slice(0, 5).join(', ')}${tickers.length > 5 ? ` +${tickers.length - 5}` : ''}`).join(' · ');
+  if (isAnyDataMock()) {
+    badge.textContent = '⚠️ DỮ LIỆU MẪU';
+    badge.title = 'Một nguồn dữ liệu chính đang dùng dữ liệu mẫu/giả lập (không phải giá thị trường thực), do backend không lấy được dữ liệu thật.';
+  } else if (partialText) {
+    badge.textContent = `⚠️ Thiếu dữ liệu — ${partialText}`;
+    badge.title = 'Giá thị trường là dữ liệu thật; chỉ các mã này không lấy được dữ liệu riêng từ nguồn, nên phần đó đang dùng dữ liệu mẫu.';
+  }
+  badge.style.display = isAnyDataMock() || partialText ? 'flex' : 'none';
   if (marketOverviewConnected) updateMarketStatus(true);
 }
 

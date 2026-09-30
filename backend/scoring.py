@@ -125,10 +125,12 @@ def momentum_6_1(closes: List[float]) -> Optional[float]:
 
 
 def factors(periods: List[Dict[str, Any]], prices: List[Tuple[str, float, float]], as_of: str,
-            is_bank: bool = False, shares_hint: Optional[float] = None) -> Optional[Dict[str, Any]]:
-    """Raw factor values at `as_of` using prices up to that date and reports published by then."""
+            is_bank: bool = False, shares_hint: Optional[float] = None, min_prices: int = 60) -> Optional[Dict[str, Any]]:
+    """Raw factor values at `as_of` using prices up to that date and reports published by then.
+    `min_prices` is 60 for validation (so every factor is computable); the live screener passes a
+    smaller number so newly listed stocks still get valuation figures (momentum/volatility stay None)."""
     px = [p for p in prices if p[0] <= as_of]
-    if len(px) < 60:
+    if len(px) < min_prices:
         return None
     price = px[-1][1]
     bal = latest_balance(periods, as_of)
@@ -158,6 +160,9 @@ def factors(periods: List[Dict[str, Any]], prices: List[Tuple[str, float, float]
     return {
         "price": price, "market_cap": mcap,
         "earnings_yield": _div(ni, mcap), "book_to_price": _div(equity, mcap),
+        "roe": _div(ni, equity) if equity and equity > 0 else None,
+        "net_margin": _div(ni, ttm(periods, as_of, "sales")) if not is_bank else None,
+        "eps": _div(ni, shares),
         "op_profitability": _div(op, equity) if equity and equity > 0 else None,
         "turnover": _div(sum(value_252) / len(value_252), mcap) if value_252 else None,
         "revenue_growth": _div(rev - rev_prev, abs(rev_prev)) if rev is not None and rev_prev else None,

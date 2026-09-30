@@ -105,7 +105,8 @@ interface PriceScenario {
 const API_BASE = '/api';
 
 // Real (non-mock) source labels returned by the backend for each endpoint.
-const REAL_SOURCES = new Set(['tcbs', 'vnstock', 'vci', 'ssi', 'dnse', 'rss', 'tcbs+rss']);
+// 'local' = computed by the backend from its own database of published statements.
+const REAL_SOURCES = new Set(['tcbs', 'vnstock', 'vci', 'ssi', 'dnse', 'rss', 'tcbs+rss', 'local']);
 
 // Tracks, per feed, whether the data currently shown is real or fallback/mock.
 // Read this from the UI to warn users when the dashboard is showing demo data.
@@ -129,8 +130,22 @@ function recordSource(key: string, source: string | undefined, asOf?: string) {
   feedProvenance[key] = { source: isMock ? 'mock' : source, fetchedAt: new Date().toISOString(), asOf, isMock };
 }
 
+// Feeds the whole dashboard depends on. Per-ticker feeds ("finance:DMX") failing only affect that ticker.
+const CORE_FEEDS = ['stocks', 'market', 'marketAnalysis', 'marketNews'];
+
+/** True when a core feed is demo data: the dashboard as a whole is not showing real prices. */
 export function isAnyDataMock(): boolean {
-  return Object.values(dataSourceStatus).some(s => s === 'mock');
+  return CORE_FEEDS.some(k => dataSourceStatus[k] === 'mock');
+}
+
+/** Tickers whose own history/finance/news fell back to demo data, e.g. { finance: ['DMX'] }. */
+export function partialMockFeeds(): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const [key, status] of Object.entries(dataSourceStatus)) {
+    const [kind, ticker] = key.split(':');
+    if (status === 'mock' && ticker) (out[kind] ||= []).push(ticker);
+  }
+  return out;
 }
 
 // The page fires dozens of these concurrently on load (20+ tickers x
