@@ -285,6 +285,9 @@ async function init() {
   // Login only exists on the deployed site (Vercel middleware), not the local dev server
   const logoutLink = document.getElementById('logoutLink');
   if (logoutLink && !['localhost', '127.0.0.1'].includes(location.hostname)) logoutLink.hidden = false;
+  // Self-hosted (Docker/VPS) password gate: show logout whenever the backend says login is on.
+  fetch('/api/health').then(r => (r.headers.get('content-type') || '').includes('json') ? r.json() : null)
+    .then(h => { if (logoutLink && h?.auth === 'on') logoutLink.hidden = false; }).catch(() => { /* no backend */ });
   window.openCouncilForTicker = openCouncilForTicker;
 
   const strategyFilter = document.getElementById('strategyFilter') as HTMLSelectElement | null;

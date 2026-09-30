@@ -33,6 +33,11 @@ SCHEMA = [
         ticker TEXT NOT NULL, d TEXT NOT NULL, close REAL, volume REAL, value REAL,
         foreign_buy_vol REAL, foreign_sell_vol REAL, foreign_net_vol REAL, PRIMARY KEY (ticker, d))""",
     """CREATE TABLE IF NOT EXISTS jobs (name TEXT PRIMARY KEY, updated_at TEXT, info TEXT)""",
+    """CREATE TABLE IF NOT EXISTS target_history (
+        ticker TEXT NOT NULL, d TEXT NOT NULL, target_price REAL, rating TEXT, PRIMARY KEY (ticker, d))""",
+    """CREATE TABLE IF NOT EXISTS grades_history (
+        ticker TEXT NOT NULL, d TEXT NOT NULL, overall_pct REAL, overall TEXT, value TEXT, quality TEXT,
+        growth TEXT, health TEXT, momentum TEXT, PRIMARY KEY (ticker, d))""",
 ]
 
 
@@ -229,6 +234,36 @@ def flows(since: str) -> Dict[str, List[Tuple[str, float, float]]]:
             px = px * 1000 if 0 < px < 1000 else px
             out.setdefault(t, []).append((d, float(net or 0) * px, float(value or 0)))
     return out
+
+
+def record_targets(day: str, rows: List[Dict[str, Any]]) -> None:
+    vals = [(r["ticker"], day, r.get("target_price"), r.get("rating")) for r in rows if r.get("target_price")]
+    with connect() as c:
+        c.executemany("INSERT INTO target_history (ticker, d, target_price, rating) VALUES (?, ?, ?, ?) "
+                      "ON CONFLICT (ticker, d) DO UPDATE SET target_price = excluded.target_price, rating = excluded.rating", vals)
+
+
+def target_history(ticker: str) -> List[Tuple[str, float, Optional[str]]]:
+    with connect() as c:
+        return [(d, float(p), r) for d, p, r in c.execute(
+            "SELECT d, target_price, rating FROM target_history WHERE ticker = ? ORDER BY d", (ticker,))]
+
+
+def record_grades(day: str, rows: List[Dict[str, Any]]) -> None:
+    vals = [(r["ticker"], day, r.get("overall_pct"), r.get("overall"), *(r["grades"].get(k) for k in ("value", "quality", "growth", "health", "momentum")))
+            for r in rows]
+    with connect() as c:
+        c.executemany("INSERT INTO grades_history (ticker, d, overall_pct, overall, value, quality, growth, health, momentum) "
+                      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (ticker, d) DO UPDATE SET overall_pct = excluded.overall_pct, "
+                      "overall = excluded.overall, value = excluded.value, quality = excluded.quality, growth = excluded.growth, "
+                      "health = excluded.health, momentum = excluded.momentum", vals)
+
+
+def grade_history(ticker: str) -> List[Dict[str, Any]]:
+    cols = ("d", "overall_pct", "overall", "value", "quality", "growth", "health", "momentum")
+    with connect() as c:
+        return [dict(zip(cols, r)) for r in c.execute(
+            f"SELECT {', '.join(cols)} FROM grades_history WHERE ticker = ? ORDER BY d", (ticker,))]
 
 
 def counts() -> Dict[str, int]:

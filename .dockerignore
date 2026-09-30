@@ -13,3 +13,4 @@ dist
 .playwright-mcp
 **/__pycache__
 *.pyc
+backups

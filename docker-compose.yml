@@ -12,10 +12,14 @@ x-backend: &backend
     context: .
     dockerfile: docker/backend.Dockerfile
   environment:
-    DATABASE_URL: postgresql://traderai:traderai@db:5432/traderai
+    DATABASE_URL: postgresql://traderai:${POSTGRES_PASSWORD:-traderai}@db:5432/traderai
     ACCOUNT_TRUSTED_NETWORKS: 172.30.57.0/24
     AUTOSYNC_MODE: docker
     TZ: Asia/Ho_Chi_Minh
+    # Self-hosting (see docker-compose.prod.yml): empty locally = no login required.
+    APP_PASSWORD: ${APP_PASSWORD:-}
+    AUTH_SECRET: ${AUTH_SECRET:-}
+    ACCOUNT_ALLOWED_ORIGINS: ${DOMAIN:-}
   volumes:
     - ./key.txt:/app/key.txt:ro
     - ./.env.local:/app/.env.local:ro
@@ -23,6 +27,12 @@ x-backend: &backend
   depends_on:
     db:
       condition: service_healthy
+  healthcheck:
+    test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+    interval: 15s
+    timeout: 5s
+    retries: 5
+    start_period: 20s
   networks: [traderai]
   restart: unless-stopped
 
@@ -31,7 +41,7 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: traderai
-      POSTGRES_PASSWORD: traderai
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-traderai}
       POSTGRES_DB: traderai
       TZ: Asia/Ho_Chi_Minh
     volumes:
@@ -54,6 +64,8 @@ services:
   scheduler:
     <<: *backend
     command: ["python", "autosync.py", "daemon"]
+    healthcheck:
+      disable: true
     profiles: [autosync]
 
   frontend:
@@ -62,7 +74,14 @@ services:
       dockerfile: docker/frontend.Dockerfile
     ports:
       - "127.0.0.1:8080:80"
-    depends_on: [backend]
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
     networks: [traderai]
     restart: unless-stopped
 

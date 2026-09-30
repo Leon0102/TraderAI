@@ -38,6 +38,71 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ==========================================
+# Password gate for self-hosting (off unless APP_PASSWORD / AUTH_SECRET are set)
+# ==========================================
+import asyncio  # noqa: E402
+from urllib.parse import parse_qs  # noqa: E402
+
+from fastapi import Request as _Request  # noqa: E402
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response  # noqa: E402
+
+sys.path.insert(0, os.path.dirname(__file__))
+import auth_gate  # noqa: E402
+
+
+@app.middleware("http")
+async def _password_gate(request: _Request, call_next):
+    path = request.url.path
+    if path.startswith("/api/") and not auth_gate.is_open_path(path):
+        if auth_gate.mode() == "misconfigured":
+            return JSONResponse({"detail": "APP_PASSWORD / AUTH_SECRET (≥ 32 ký tự) cấu hình chưa đủ."}, status_code=503)
+        if not auth_gate.valid_session(request.cookies.get(auth_gate.SESSION_COOKIE)):
+            return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+    return await call_next(request)
+
+
+@app.get("/api/health")
+def api_health():
+    return {"ok": True, "auth": auth_gate.mode()}
+
+
+@app.get("/api/auth/check")
+def api_auth_check(request: _Request):
+    """nginx auth_request target: 204 when the page may be served, 401 otherwise."""
+    if auth_gate.mode() == "misconfigured":
+        return Response(status_code=503)
+    ok = auth_gate.valid_session(request.cookies.get(auth_gate.SESSION_COOKIE))
+    return Response(status_code=204 if ok else 401)
+
+
+@app.get("/login")
+@app.get("/api/auth/login")
+def api_auth_login_page(request: _Request, next: str = "/"):
+    if auth_gate.mode() == "off" or auth_gate.valid_session(request.cookies.get(auth_gate.SESSION_COOKIE)):
+        return RedirectResponse(auth_gate.safe_next(next), status_code=303)
+    return HTMLResponse(auth_gate.login_page(auth_gate.safe_next(next)), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/auth/login")
+async def api_auth_login(request: _Request):
+    form = parse_qs((await request.body()).decode("utf-8", "replace"))
+    password = (form.get("password") or [""])[0]
+    next_path = auth_gate.safe_next((form.get("next") or ["/"])[0])
+    if auth_gate.mode() == "on" and auth_gate.password_ok(password):
+        resp = RedirectResponse(next_path, status_code=303)
+        resp.headers["Set-Cookie"] = auth_gate.cookie_header(auth_gate.create_session(), auth_gate.SESSION_DAYS * 86_400)
+        return resp
+    await asyncio.sleep(0.8)  # slow down guessing
+    return HTMLResponse(auth_gate.login_page(next_path, "Mật khẩu không đúng."), status_code=401)
+
+
+@app.get("/api/auth/logout")
+def api_auth_logout():
+    resp = RedirectResponse("/login", status_code=303)
+    resp.headers["Set-Cookie"] = auth_gate.cookie_header("", 0)
+    return resp
+
 
 @app.get("/api/market")
 def api_market(action: Optional[str] = Query(default=None)):
@@ -210,6 +275,8 @@ from agents.llm import call_llm, normalize_provider, resolve_api_key, LLMError  
 from agents.prompts import PORTFOLIO_REVIEW_PROMPT, GROUNDING_RULES  # noqa: E402
 
 _LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost"}
+# Self-hosted behind the password gate: the site's own hostname(s) may call account endpoints.
+_ALLOWED_ORIGIN_HOSTS = _LOCAL_HOSTS | {h.strip() for h in os.environ.get("ACCOUNT_ALLOWED_ORIGINS", "").split(",") if h.strip()}
 # Docker: requests reach the backend from the nginx container, not 127.0.0.1. docker-compose sets
 # ACCOUNT_TRUSTED_NETWORKS to its private bridge network and publishes ports on 127.0.0.1 only.
 _TRUSTED_NETS = [ipaddress.ip_network(n.strip()) for n in os.environ.get("ACCOUNT_TRUSTED_NETWORKS", "").split(",") if n.strip()]
@@ -230,7 +297,7 @@ def _require_local(request: Request) -> None:
     so reject callers from other machines and pages served from other sites."""
     client = request.client.host if request.client else ""
     origin = request.headers.get("origin")
-    if not _is_trusted_client(client) or (origin and urlparse(origin).hostname not in _LOCAL_HOSTS):
+    if not _is_trusted_client(client) or (origin and urlparse(origin).hostname not in _ALLOWED_ORIGIN_HOSTS):
         raise HTTPException(status_code=403, detail="Dữ liệu tài khoản TCBS chỉ truy cập được từ máy local.")
 
 

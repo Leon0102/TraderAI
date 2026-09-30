@@ -53,6 +53,14 @@ def run() -> int:
     sectors = {t: c.get("sectorVn") for t, c in companies.items() if c.get("sectorVn")}
     violations = personal_rules.evaluate(analysis, sectors)
     alerts = notify.collect_alerts(analysis, ctx["plan"], ctx["forecasts"], violations, news)
+    try:  # validated grades from the market database, when it has been ingested
+        import quant_service
+        if quant_service.available():
+            for d in quant_service.grade_drops(tickers):
+                alerts.append({"id": f"grade:{d['ticker']}:{d['on']}",
+                               "text": f"📉 {d['ticker']}: điểm định lượng giảm {d['from']} → {d['to']} (so với {d['since']})."})
+    except Exception as e:
+        print(f"{stamp} grade check skipped: {e!r}")
     result = notify.deliver(notify.fresh(alerts))
     report = None
     if date.today().weekday() == 4 and not weekly_report.read_report(weekly_report.week_id()):

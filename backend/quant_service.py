@@ -55,6 +55,7 @@ def _compute_scores() -> Dict[str, Any]:
         if f:
             raw[t] = f
     graded = sc.grade_universe(raw, {t: (uni.get(t) or {}).get("sector") for t in raw})
+    revisions_all = {t: revisions(t) for t in graded}
     rows = []
     for t, g in graded.items():
         f, u = raw[t], uni.get(t) or {}
@@ -65,7 +66,8 @@ def _compute_scores() -> Dict[str, Any]:
                      "pb": round(1 / f["book_to_price"], 2) if f.get("book_to_price") and f["book_to_price"] > 0 else None,
                      "roe_op": round(f["op_profitability"] * 100, 1) if f.get("op_profitability") is not None else None,
                      "momentum_6_1_pct": round(f["momentum_6_1"] * 100, 1) if f.get("momentum_6_1") is not None else None,
-                     "analyst_target": u.get("target_price"), "rating": u.get("rating")})
+                     "analyst_target": u.get("target_price"), "rating": u.get("rating"),
+                     "target_change_90d_pct": (revisions_all.get(t) or {}).get("change_90d_pct")})
     rows.sort(key=lambda r: -(r["overall_pct"] or -1))
     return {"as_of": today, "rows": rows, "raw": raw, "graded": graded, "universe": uni, "stmts": stmts}
 
@@ -95,8 +97,42 @@ def stock_card(ticker: str, beta: Optional[float] = None) -> Optional[Dict[str, 
     return {"ticker": t, "name": u.get("name"), "sector": u.get("sector"), "as_of": s["as_of"], "overall": g["overall"],
             "overall_pct": g["overall_pct"], "grades": g["grades"], "group_pct": g["group_pct"], "caps": g["caps"],
             "percentiles": g["percentiles"], "factors": pretty, "fscore": f.get("fscore_detail"), "dcf": valuation,
-            "analyst": {"target": u.get("target_price"), "rating": u.get("rating"), "dps": u.get("dps")},
+            "analyst": {"target": u.get("target_price"), "rating": u.get("rating"), "dps": u.get("dps"), "revisions": revisions(t)},
+            "grade_history": [{"d": r["d"], "overall_pct": r["overall_pct"], "overall": r["overall"]} for r in db.grade_history(t)][-120:],
             "evidence": {r["factor"]: r["verdict"] for r in (val or {}).get("results", [])}}
+
+
+GRADE_ORDER = "ABCDF"
+
+
+def revisions(ticker: str) -> Optional[Dict[str, Any]]:
+    """Analyst target-price change over ~30 and ~90 days from the stored daily snapshots."""
+    hist = db.target_history(ticker)
+    if len(hist) < 2:
+        return {"days": len(hist), "change_30d_pct": None, "change_90d_pct": None, "history": hist[-60:]} if hist else None
+    last_d, last_p, _ = hist[-1]
+
+    def change(days: int) -> Optional[float]:
+        cutoff = (date.fromisoformat(last_d) - timedelta(days=days)).isoformat()
+        older = [p for d, p, _ in hist if d <= cutoff]
+        return round((last_p / older[-1] - 1) * 100, 1) if older and older[-1] else None
+    return {"days": len(hist), "change_30d_pct": change(30), "change_90d_pct": change(90), "since": hist[0][0], "history": hist[-60:]}
+
+
+def grade_drops(tickers: List[str]) -> List[Dict[str, Any]]:
+    """Holdings whose overall grade fell versus the previous snapshot."""
+    out = []
+    for t in tickers:
+        h = [r for r in db.grade_history(t) if r["overall"]]
+        if len(h) >= 2 and GRADE_ORDER.index(h[-1]["overall"]) > GRADE_ORDER.index(h[-2]["overall"]):
+            out.append({"ticker": t, "from": h[-2]["overall"], "to": h[-1]["overall"], "since": h[-2]["d"], "on": h[-1]["d"]})
+    return out
+
+
+def snapshot_grades() -> int:
+    rows = scores()["rows"]
+    db.record_grades(sc.as_of_today(), rows)
+    return len(rows)
 
 
 def brief_for_llm(ticker: str) -> Optional[str]:
@@ -196,6 +232,8 @@ def run_pipeline(quick: bool = False) -> Dict[str, Any]:
             import factor_validation
             factor_validation.run()
         invalidate()
+        if not quick:
+            info["grades_snapshot"] = snapshot_grades()
         return info
     finally:
         _job_lock.release()

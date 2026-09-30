@@ -1,0 +1,41 @@
+# VPS overlay: HTTPS via Caddy, nothing else published, password login required.
+#   cp .env.example .env   # fill DOMAIN, APP_PASSWORD, AUTH_SECRET, POSTGRES_PASSWORD
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile autosync up -d --build
+# Point the DOMAIN's A record at the VPS first; Caddy then obtains the certificate itself.
+
+services:
+  db:
+    ports: !reset []
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+
+  backend:
+    ports: !reset []
+    environment:
+      APP_PASSWORD: ${APP_PASSWORD:?set APP_PASSWORD in .env}
+      AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET (≥ 32 chars) in .env}
+      ACCOUNT_ALLOWED_ORIGINS: ${DOMAIN:?set DOMAIN in .env}
+      COOKIE_SECURE: "1"
+
+  scheduler:
+    environment:
+      APP_PASSWORD: ${APP_PASSWORD:?set APP_PASSWORD in .env}
+      AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET in .env}
+
+  frontend:
+    ports: !reset []
+
+  caddy:
+    image: caddy:2-alpine
+    command: ["caddy", "reverse-proxy", "--from", "${DOMAIN}", "--to", "frontend:80"]
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy_data:/data
+    depends_on: [frontend]
+    networks: [traderai]
+    restart: unless-stopped
+
+volumes:
+  caddy_data:

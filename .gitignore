@@ -38,3 +38,8 @@ runtime/
 
 # Secrets
 key.txt
+
+# Local secrets & database dumps
+.env
+backups/
+!.env.example

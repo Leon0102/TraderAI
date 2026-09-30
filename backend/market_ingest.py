@@ -104,6 +104,7 @@ def ingest_companies(tickers: List[str]) -> int:
                      "market_cap": c.get("marketCap"), "rating": c.get("rating"), "target_price": c.get("targetPrice"),
                      "dps": c.get("dividendPerShareTsr"), "is_bank": 1 if c.get("isBank") else 0, "updated_at": now})
     db.upsert_universe(rows)
+    db.record_targets(date.today().isoformat(), rows)  # analyst revisions build up day by day
     return len(rows)
 
 

@@ -26,6 +26,7 @@ LIQUID_VALUE = 1_000_000_000
 # factor -> (label, higher-is-better, needs statements)
 FACTORS = {
     "overall": ("Điểm tổng hợp A–F", True, True),
+    "value_combo": ("Giá trị kết hợp (E/P + B/P)", True, True),
     "fscore": ("Piotroski F-score", True, True),
     "earnings_yield": ("Lợi nhuận/giá (E/P)", True, True),
     "book_to_price": ("Giá trị sổ sách/giá (B/P)", True, True),
@@ -35,6 +36,30 @@ FACTORS = {
     "momentum_6_1": ("Momentum 6-1 tháng", True, False),
 }
 FACTOR_SERIES = {"SMB": "size", "VALUE": "earnings_yield", "QUALITY": "fscore", "TURN": "turnover", "MOM": "momentum_6_1"}
+# Long-only model portfolios: the N best names by a score, equal weight, rebalanced monthly.
+STRATEGIES = {"overall": "Top 10 theo điểm tổng hợp", "value_combo": "Top 10 theo giá trị kết hợp"}
+STRATEGY_SIZE = 10
+
+
+def _rank_pct(values: Dict[str, Optional[float]]) -> Dict[str, float]:
+    items = sorted(((t, v) for t, v in values.items() if v is not None and math.isfinite(v)), key=lambda kv: kv[1])
+    n = len(items)
+    return {t: i / (n - 1) for i, (t, _) in enumerate(items)} if n > 1 else {}
+
+
+def _curve_stats(rets: List[float]) -> Dict[str, Optional[float]]:
+    if len(rets) < 3:
+        return {"cagr_pct": None, "vol_pct": None, "sharpe": None, "max_dd_pct": None, "total_pct": None}
+    eq, peak, dd = 1.0, 1.0, 0.0
+    for r in rets:
+        eq *= 1 + r
+        peak = max(peak, eq)
+        dd = min(dd, eq / peak - 1)
+    mean = sum(rets) / len(rets)
+    sd = math.sqrt(sum((r - mean) ** 2 for r in rets) / (len(rets) - 1))
+    return {"cagr_pct": round((eq ** (12 / len(rets)) - 1) * 100, 1), "vol_pct": round(sd * math.sqrt(12) * 100, 1),
+            "sharpe": round(mean / sd * math.sqrt(12), 2) if sd > 0 else None, "max_dd_pct": round(dd * 100, 1),
+            "total_pct": round((eq - 1) * 100, 1)}
 
 
 def month_ends(dates: List[str]) -> List[str]:
@@ -93,6 +118,11 @@ def run(years: int = 4, min_names: int = 25) -> Dict[str, Any]:
     date_idx = {d: i for i, d in enumerate(all_dates)}
 
     monthly: Dict[str, Dict[str, List[float]]] = {f: {"top_excess": [], "spread": [], "ic": [], "net": [], "vs_market": []} for f in FACTORS}
+    strat: Dict[str, List[Dict[str, Any]]] = {k: [] for k in STRATEGIES}
+    prev_picks: Dict[str, set] = {k: set() for k in STRATEGIES}
+    ew_market: List[Dict[str, Any]] = []
+    vn_market: List[Dict[str, Any]] = []
+    index_px = dict((d, c) for d, c, _ in db.price_panel(["VNINDEX"], since=since).get("VNINDEX", []))
     prev_top: Dict[str, set] = {f: set() for f in FACTORS}
     members: List[Tuple[str, str, Dict[str, Tuple[set, set]]]] = []  # (start, end, factor -> (long, short))
     eligible_counts = []
@@ -129,6 +159,23 @@ def run(years: int = 4, min_names: int = 25) -> Dict[str, Any]:
                                    {t: (uni.get(t) or {}).get("sector") for t in raw})
         for t, g in graded.items():
             raw[t]["overall"] = g["overall_pct"]
+        ep_rank = _rank_pct({t: raw[t].get("earnings_yield") for t in raw})
+        bp_rank = _rank_pct({t: raw[t].get("book_to_price") for t in raw})
+        for t in raw:
+            if t in ep_rank and t in bp_rank:
+                raw[t]["value_combo"] = (ep_rank[t] + bp_rank[t]) / 2
+        # model portfolios
+        for key in STRATEGIES:
+            ranked = sorted(((t, raw[t].get(key)) for t in eligible if raw[t].get(key) is not None), key=lambda kv: -kv[1])
+            picks = [t for t, _ in ranked[:STRATEGY_SIZE]]
+            if len(picks) < STRATEGY_SIZE:
+                continue
+            churn = 1.0 if not prev_picks[key] else len(set(picks) - prev_picks[key]) / len(picks)
+            prev_picks[key] = set(picks)
+            strat[key].append({"month": m1, "ret": sum(fwd[t] for t in picks) / len(picks) - churn * COST_PER_TURNOVER, "picks": picks})
+        ew_market.append({"month": m1, "ret": market})
+        if index_px.get(m0) and index_px.get(m1):
+            vn_market.append({"month": m1, "ret": index_px[m1] / index_px[m0] - 1})
         split: Dict[str, Tuple[set, set]] = {}
         for fac, (_, higher, _) in FACTORS.items():
             pairs = [(t, raw[t].get(fac)) for t in eligible if raw[t].get(fac) is not None and math.isfinite(raw[t][fac])]
@@ -180,6 +227,19 @@ def run(years: int = 4, min_names: int = 25) -> Dict[str, Any]:
     out = {"results": results, "months": len(members), "avg_eligible": round(sum(eligible_counts) / len(eligible_counts)) if eligible_counts else 0,
            "from": ends[0] if ends else None, "to": ends[-1] if ends else None, "cost_per_turnover_pct": COST_PER_TURNOVER * 100,
            "caveat": "Chỉ có BCTC cho các mã đang thanh khoản hôm nay (thiên lệch sống sót) — kết quả của yếu tố cơ bản có thể đẹp hơn thực tế."}
+    months_all = [m["month"] for m in ew_market]
+    out["strategies"] = {
+        "size": STRATEGY_SIZE,
+        "benchmarks": {"vnindex": {"label": "VN-Index", "stats": _curve_stats([m["ret"] for m in vn_market]), "monthly": vn_market},
+                       "equal_weight": {"label": "Trung bình mã thanh khoản", "stats": _curve_stats([m["ret"] for m in ew_market]), "monthly": ew_market}},
+        "models": {k: {"label": label, "stats": _curve_stats([m["ret"] for m in strat[k]]),
+                       "monthly": [{"month": m["month"], "ret": round(m["ret"], 5)} for m in strat[k]],
+                       "latest_picks": strat[k][-1]["picks"] if strat[k] else [],
+                       "beat_vnindex_pct": round(sum(1 for a, b in zip(strat[k], vn_market) if a["ret"] > b["ret"]) / len(strat[k]) * 100, 1) if strat[k] and vn_market else None}
+                   for k, label in STRATEGIES.items()},
+        "months": months_all,
+        "note": "Mua đều 10 mã điểm cao nhất vào cuối mỗi tháng, giữ 1 tháng, đã trừ phí 0,3% trên phần danh mục thay đổi. Không tính cổ tức (thiệt cho danh mục giá trị) và vẫn có thiên lệch sống sót.",
+    }
     db.set_job("validation", out)
     db.set_job("factor_series", {"series": factor_daily})
     return out

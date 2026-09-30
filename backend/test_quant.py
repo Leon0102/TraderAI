@@ -138,6 +138,27 @@ def test_validation_finds_the_planted_factor():
     assert res["earnings_yield"]["net_excess"]["mean_pct"] > 0, res["earnings_yield"]
     assert (res["turnover"]["net_excess"]["t"] or 0) < planted["net_excess"]["t"], "a noise factor must not beat the planted one"
     assert db.get_job("factor_series")["series"]["VALUE"], "daily factor returns stored for regression"
+    st = out["strategies"]
+    for key in ("overall", "value_combo"):
+        m = st["models"][key]
+        assert len(m["latest_picks"]) == st["size"] and len(m["monthly"]) >= 20 and m["stats"]["max_dd_pct"] <= 0
+    assert st["benchmarks"]["vnindex"]["stats"]["cagr_pct"] is not None
+
+
+def test_revisions_and_grade_drops():
+    import quant_service as q
+    db.record_targets("2026-06-01", [{"ticker": "AAA", "target_price": 20_000, "rating": "BUY"}])
+    db.record_targets("2026-08-20", [{"ticker": "AAA", "target_price": 22_000, "rating": "BUY"}])
+    db.record_targets("2026-09-30", [{"ticker": "AAA", "target_price": 24_200, "rating": "BUY"}, {"ticker": "BBB", "target_price": None}])
+    r = q.revisions("AAA")
+    assert r["days"] == 3 and r["change_30d_pct"] == 10.0 and r["change_90d_pct"] == 21.0
+    assert q.revisions("BBB") is None, "rows without a target are not stored"
+    g = lambda o: {"ticker": "AAA", "overall_pct": 50, "overall": o, "grades": {}}  # noqa: E731
+    db.record_grades("2026-09-29", [g("B")])
+    db.record_grades("2026-09-30", [g("D")])
+    assert q.grade_drops(["AAA"]) == [{"ticker": "AAA", "from": "B", "to": "D", "since": "2026-09-29", "on": "2026-09-30"}]
+    db.record_grades("2026-10-01", [g("C")])
+    assert q.grade_drops(["AAA"]) == [], "an upgrade is not an alert"
 
 
 def test_market_views_on_synthetic_data():

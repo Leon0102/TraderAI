@@ -113,7 +113,7 @@ function drawMarketCharts(m: Market) {
 
 // ---------- screener & stock card ----------
 
-type Row = { ticker: string; name: string | null; sector: string | null; price: number; overall: string | null; overall_pct: number | null; grades: Record<string, string | null>; caps: string[]; fscore: number | null; pe: number | null; pb: number | null; roe_op: number | null; momentum_6_1_pct: number | null };
+type Row = { ticker: string; name: string | null; sector: string | null; price: number; overall: string | null; overall_pct: number | null; grades: Record<string, string | null>; caps: string[]; fscore: number | null; pe: number | null; pb: number | null; roe_op: number | null; momentum_6_1_pct: number | null; target_change_90d_pct: number | null };
 let screenerState = { sector: '', grade: '' };
 
 async function loadScreener() {
@@ -128,8 +128,8 @@ async function loadScreener() {
     box.innerHTML = `<form id="qFilter" class="plan-goal"><select id="qSector" aria-label="Ngành"><option value="">Tất cả ngành</option>${d.sectors.map(s => `<option${s === screenerState.sector ? ' selected' : ''}>${esc(s)}</option>`).join('')}</select>
         <select id="qGrade" aria-label="Điểm tối thiểu"><option value="">Mọi điểm</option>${['A', 'B', 'C'].map(g => `<option value="${g}"${g === screenerState.grade ? ' selected' : ''}>Từ ${g} trở lên</option>`).join('')}</select>
         <span class="form-hint">${d.count} mã · ngày ${esc(d.as_of)}</span></form>
-      <div class="portfolio-table-wrap"><table class="portfolio-table q-table"><thead><tr><th>Mã</th><th>Ngành</th><th>Tổng</th><th>Giá trị</th><th>Chất lượng</th><th>Tăng trưởng</th><th>Sức khỏe</th><th>Momentum*</th><th>F-score</th><th>P/E</th><th>P/B</th><th>Giá</th><th></th></tr></thead><tbody>
-      ${d.rows.map(r => `<tr><td><strong>${esc(r.ticker)}</strong></td><td class="q-sector">${esc(r.sector || '')}</td><td>${badge(r.overall)}${r.caps.length ? ' <span title="' + esc(r.caps.join('; ')) + '">⚑</span>' : ''}</td>${['value', 'quality', 'growth', 'health', 'momentum'].map(g => `<td>${badge(r.grades[g])}</td>`).join('')}<td>${r.fscore ?? '—'}</td><td>${r.pe ?? '—'}</td><td>${r.pb ?? '—'}</td><td>${vnd(r.price)}</td><td><button class="table-action" data-qcard="${esc(r.ticker)}">Chi tiết</button></td></tr>`).join('')}
+      <div class="portfolio-table-wrap"><table class="portfolio-table q-table"><thead><tr><th>Mã</th><th>Ngành</th><th>Tổng</th><th>Giá trị</th><th>Chất lượng</th><th>Tăng trưởng</th><th>Sức khỏe</th><th>Momentum*</th><th>F-score</th><th>P/E</th><th>P/B</th><th>Δ mục tiêu 90N</th><th>Giá</th><th></th></tr></thead><tbody>
+      ${d.rows.map(r => `<tr><td><strong>${esc(r.ticker)}</strong></td><td class="q-sector">${esc(r.sector || '')}</td><td>${badge(r.overall)}${r.caps.length ? ' <span title="' + esc(r.caps.join('; ')) + '">⚑</span>' : ''}</td>${['value', 'quality', 'growth', 'health', 'momentum'].map(g => `<td>${badge(r.grades[g])}</td>`).join('')}<td>${r.fscore ?? '—'}</td><td>${r.pe ?? '—'}</td><td>${r.pb ?? '—'}</td><td>${pct(r.target_change_90d_pct)}</td><td>${vnd(r.price)}</td><td><button class="table-action" data-qcard="${esc(r.ticker)}">Chi tiết</button></td></tr>`).join('')}
       </tbody></table></div>
       <div id="qCard"></div>
       <p class="form-hint">Điểm A–F so với các mã cùng ngành (A = top 20%). Tổng = 35% Chất lượng + 35% Giá trị + 15% Tăng trưởng + 15% Sức khỏe; ⚑ = bị hạ bậc vì cờ đỏ. *Momentum chỉ để tham khảo — không có bằng chứng hiệu quả ở Việt Nam, không tính vào điểm tổng.</p>`;
@@ -146,8 +146,24 @@ type Card = {
   grades: Record<string, string | null>; group_pct: Record<string, number | null>; caps: string[]; percentiles: Record<string, number>;
   factors: Record<string, number | null>; fscore: null | { score: number; tests: number; score_9: number; year: number; details: Record<string, boolean | null> };
   dcf: null | { applicable: boolean; reason?: string; reliability?: string; fair_value?: number; low?: number; high?: number; discount_pct?: number; cost_of_equity_pct?: number; stage1_growth_pct?: number; terminal_growth_pct?: number; beta_used?: number; zone?: string };
-  analyst: { target: number | null; rating: string | null; dps: number | null }; evidence: Record<string, string>;
+  analyst: { target: number | null; rating: string | null; dps: number | null; revisions: null | { days: number; change_30d_pct: number | null; change_90d_pct: number | null; since?: string } };
+  evidence: Record<string, string>; grade_history: Array<{ d: string; overall_pct: number | null; overall: string | null }>;
 };
+
+function revisionText(r: Card['analyst']['revisions']): string {
+  if (!r) return '';
+  if (r.change_30d_pct == null && r.change_90d_pct == null) return ` · theo dõi điều chỉnh mục tiêu từ ${esc(r.since || 'hôm nay')} (${r.days} ngày dữ liệu)`;
+  return ` · điều chỉnh mục tiêu 30 ngày ${pct(r.change_30d_pct)}, 90 ngày ${pct(r.change_90d_pct)}`;
+}
+
+function gradeSparkline(h: Card['grade_history']): string {
+  const pts = h.filter(p => p.overall_pct != null);
+  if (pts.length < 2) return `<p class="form-hint">Lịch sử điểm: ${pts.length} lần chấm (tích lũy mỗi lần nạp dữ liệu).</p>`;
+  const W = 240, H = 40;
+  const path = pts.map((p, i) => `${(i / (pts.length - 1) * W).toFixed(1)},${(H - (p.overall_pct as number) / 100 * H).toFixed(1)}`).join(' ');
+  return `<div class="q-spark"><span class="form-hint">Điểm tổng theo thời gian (${esc(pts[0].d)} → ${esc(pts[pts.length - 1].d)})</span>
+    <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><line x1="0" y1="${H * 0.4}" x2="${W}" y2="${H * 0.4}" class="rrg-axis"/><polyline points="${path}" fill="none" stroke="#6E8FD6" stroke-width="2"/></svg></div>`;
+}
 
 export async function renderStockQuantCard(ticker: string, el: HTMLElement) {
   el.innerHTML = '<p class="form-hint">Đang tải điểm định lượng…</p>';
@@ -175,7 +191,8 @@ export async function renderStockQuantCard(ticker: string, el: HTMLElement) {
           ${d.reliability === 'thấp' ? '<p class="tcbs-flag medium">Độ tin cậy thấp: giá trị hợp lý lệch quá 60% so với giá — nhiều khả năng giả định dòng tiền không phù hợp với doanh nghiệp này.</p>' : ''}
           <p class="form-hint">Dòng tiền tự do = dòng tiền kinh doanh − chi đầu tư TSCĐ, trung bình 3 năm; tăng trưởng giai đoạn 1 lấy mức thấp nhất giữa trung vị, CAGR và 4 quý gần nhất. Độ rộng vùng theo biến động giá. Rất nhạy với giả định — dùng làm tham chiếu.</p></div>`
           : `<p class="form-hint">DCF: ${esc(d.reason || 'không áp dụng')}</p>`) : ''}
-      ${c.analyst.target ? `<p class="form-hint">Nhà phân tích (Vietcap): ${esc(c.analyst.rating || '')} · mục tiêu ${vnd(c.analyst.target)} đ${c.analyst.dps ? ` · cổ tức ${vnd(c.analyst.dps)} đ/cp` : ''}</p>` : ''}
+      ${c.analyst.target ? `<p class="form-hint">Nhà phân tích (Vietcap): ${esc(c.analyst.rating || '')} · mục tiêu ${vnd(c.analyst.target)} đ${c.analyst.dps ? ` · cổ tức ${vnd(c.analyst.dps)} đ/cp` : ''}${revisionText(c.analyst.revisions)}</p>` : ''}
+      ${gradeSparkline(c.grade_history)}
     </div>`;
   } catch (e) {
     el.innerHTML = (e as { offline?: boolean }).offline ? '' : `<p class="form-hint">${esc((e as Error).message)}</p>`;
@@ -184,7 +201,9 @@ export async function renderStockQuantCard(ticker: string, el: HTMLElement) {
 
 // ---------- validation & data tabs ----------
 
-type Validation = { results: Array<{ factor: string; label: string; months: number; verdict: string; net_excess: { mean_pct: number | null; t: number | null; hit_pct: number | null; annual_pct: number | null }; long_short: { mean_pct: number | null }; vs_all_market: { annual_pct: number | null }; ic_mean: number | null }>; months: number; avg_eligible: number; from: string; to: string; cost_per_turnover_pct: number; caveat: string; updated_at: string };
+type Curve = { label: string; stats: { cagr_pct: number | null; vol_pct: number | null; sharpe: number | null; max_dd_pct: number | null; total_pct: number | null }; monthly: Array<{ month: string; ret: number }>; latest_picks?: string[]; beat_vnindex_pct?: number | null };
+type Strategies = { size: number; benchmarks: Record<string, Curve>; models: Record<string, Curve>; note: string };
+type Validation = { strategies?: Strategies; results: Array<{ factor: string; label: string; months: number; verdict: string; net_excess: { mean_pct: number | null; t: number | null; hit_pct: number | null; annual_pct: number | null }; long_short: { mean_pct: number | null }; vs_all_market: { annual_pct: number | null }; ic_mean: number | null }>; months: number; avg_eligible: number; from: string; to: string; cost_per_turnover_pct: number; caveat: string; updated_at: string };
 
 async function loadValidation() {
   const box = $('qValidation');
@@ -195,10 +214,36 @@ async function loadValidation() {
       <div class="portfolio-table-wrap"><table class="portfolio-table"><thead><tr><th>Tiêu chí</th><th>Kết luận</th><th>Vượt trội/tháng (sau phí)</th><th>~/năm</th><th>t-stat</th><th>Tháng thắng</th><th>Top − đáy/tháng</th><th>IC</th></tr></thead><tbody>
       ${v.results.map(r => `<tr><td><strong>${esc(r.label)}</strong></td><td><span class="plan-action ${VERDICT_TONE[r.verdict] || ''}">${esc(r.verdict)}</span></td><td>${pct(r.net_excess.mean_pct, 2)}</td><td>${pct(r.net_excess.annual_pct)}</td><td>${r.net_excess.t ?? '—'}</td><td>${r.net_excess.hit_pct ?? '—'}%</td><td>${pct(r.long_short.mean_pct, 2)}</td><td>${r.ic_mean ?? '—'}</td></tr>`).join('')}
       </tbody></table></div>
-      <p class="form-hint">"Có bằng chứng" = t ≥ 2. ${esc(v.caveat)} Kiểm định lúc ${esc(v.updated_at)}.</p>`;
+      <p class="form-hint">"Có bằng chứng" = t ≥ 2. ${esc(v.caveat)} Kiểm định lúc ${esc(v.updated_at)}.</p>
+      ${v.strategies ? renderStrategies(v.strategies) : ''}`;
+    if (v.strategies) drawStrategies(v.strategies);
+    box.querySelectorAll<HTMLElement>('[data-pick]').forEach(b => b.addEventListener('click', async () => {
+      await showTab('screener');  // resolves once the screener (and its card slot) is rendered
+      const el = $('qCard');
+      if (el) { await renderStockQuantCard(b.dataset.pick!, el); el.scrollIntoView({ behavior: 'smooth' }); }
+    }));
   } catch (e) {
     box.innerHTML = `<p class="form-hint">${esc((e as Error).message)}</p>`;
   }
+}
+
+const CURVE_COLORS: Record<string, string> = { vnindex: '#8E9CB4', equal_weight: '#69758A', overall: '#6E8FD6', value_combo: '#16C784' };
+
+function renderStrategies(st: Strategies): string {
+  const rows = [...Object.entries(st.models), ...Object.entries(st.benchmarks)].map(([k, c]) => `<tr><td><i class="dot" style="background:${CURVE_COLORS[k] || '#ccc'}"></i><strong>${esc(c.label)}</strong></td><td>${pct(c.stats.cagr_pct)}</td><td>${pct(c.stats.total_pct)}</td><td>${c.stats.vol_pct ?? '—'}%</td><td>${c.stats.sharpe ?? '—'}</td><td>${pct(c.stats.max_dd_pct)}</td><td>${c.beat_vnindex_pct != null ? `${c.beat_vnindex_pct}%` : '—'}</td></tr>`).join('');
+  const picks = Object.entries(st.models).map(([, c]) => `<p class="plan-note"><b>${esc(c.label)}</b> — danh mục tháng này: ${(c.latest_picks || []).map(t => `<button class="table-action" data-pick="${esc(t)}">${esc(t)}</button>`).join(' ')}</p>`).join('');
+  return `<section class="insight-block"><h4>Danh mục mẫu (top ${st.size}, tái cân bằng hàng tháng)</h4>
+    <div id="qStrategyChart" class="q-chart"></div>
+    <div class="portfolio-table-wrap"><table class="portfolio-table"><thead><tr><th>Danh mục</th><th>Lợi nhuận/năm</th><th>Tổng</th><th>Biến động/năm</th><th>Sharpe</th><th>Sụt giảm lớn nhất</th><th>Tháng thắng VN-Index</th></tr></thead><tbody>${rows}</tbody></table></div>
+    ${picks}
+    <p class="tcbs-flag medium">${esc(st.note)} Kết quả quá khứ trên dữ liệu có thiên lệch sống sót thường đẹp hơn thực tế đáng kể — đây là cơ sở để nghiên cứu tiếp, không phải cam kết lợi nhuận.</p></section>`;
+}
+
+function drawStrategies(st: Strategies) {
+  const el = $('qStrategyChart');
+  if (!el) return;
+  const curve = (c: Curve) => { let eq = 100; return c.monthly.map(m => ({ time: m.month, value: (eq *= 1 + m.ret) })); };
+  lineChart(el, [...Object.entries(st.models), ...Object.entries(st.benchmarks)].map(([k, c]) => ({ name: c.label.replace('Top 10 theo ', ''), color: CURVE_COLORS[k] || '#ccc', points: curve(c), dashed: k in st.benchmarks })));
 }
 
 type Status = { available: boolean; engine?: string; running?: boolean; counts?: Record<string, number>; ingest?: Record<string, unknown> & { updated_at?: string; state?: string; seconds?: number; error?: string }; validation_at?: string };
@@ -236,7 +281,7 @@ async function loadStatus(poll = false) {
 const loadedTabs = new Set<string>();
 let currentTab = 'market';
 
-async function showTab(tab: string) {
+async function showTab(tab: string): Promise<void> {
   currentTab = tab;
   document.querySelectorAll<HTMLElement>('[data-qtab-btn]').forEach(b => b.classList.toggle('active', b.dataset.qtabBtn === tab));
   document.querySelectorAll<HTMLElement>('[data-qtab]').forEach(p => { p.hidden = p.dataset.qtab !== tab; });
@@ -254,9 +299,9 @@ async function showTab(tab: string) {
       loadedTabs.delete(tab);
       box.innerHTML = `<p class="form-hint">${esc((e as Error).message)}</p>`;
     }
-  } else if (tab === 'screener') loadScreener();
-  else if (tab === 'validation') loadValidation();
-  else if (tab === 'data') loadStatus();
+  } else if (tab === 'screener') await loadScreener();
+  else if (tab === 'validation') await loadValidation();
+  else if (tab === 'data') await loadStatus();
 }
 
 export async function initQuantPanel() {
