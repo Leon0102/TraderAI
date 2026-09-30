@@ -72,6 +72,28 @@ def latest_balance(periods: List[Dict[str, Any]], as_of: str) -> Optional[Dict[s
     return max(pub, key=lambda p: (p["year"], p["quarter"] or 5)) if pub else None
 
 
+# ---------- earnings surprise (SUE) ----------
+
+def sue(periods: List[Dict[str, Any]], as_of: str, max_age_days: int = 90) -> Optional[float]:
+    """Standardised unexpected earnings: latest quarter's year-over-year change in net income divided
+    by the standard deviation of the same change over the previous 8 quarters (Bernard & Thomas).
+    Post-earnings-announcement drift is short-lived, so the value is None once the latest report is
+    older than `max_age_days`."""
+    q = sorted(quarters_as_of(periods, as_of), key=lambda p: (p["year"], p["quarter"]))
+    ni = {(p["year"], p["quarter"]): _v(p, "net_income") for p in q}
+    diffs = [(k, v - ni[(k[0] - 1, k[1])]) for k, v in ni.items() if v is not None and ni.get((k[0] - 1, k[1])) is not None]
+    diffs.sort()
+    if len(diffs) < 5 or diffs[-1][0] != (q[-1]["year"], q[-1]["quarter"]):
+        return None
+    pub = q[-1].get("public_date")
+    if not pub or (date.fromisoformat(as_of) - date.fromisoformat(pub)).days > max_age_days:
+        return None
+    hist = [d for _, d in diffs[-9:-1]]
+    mean = sum(hist) / len(hist)
+    sd = math.sqrt(sum((d - mean) ** 2 for d in hist) / (len(hist) - 1)) if len(hist) > 1 else 0.0
+    return round((diffs[-1][1] - mean) / sd, 3) if sd > 0 else None
+
+
 # ---------- Piotroski ----------
 
 def piotroski(periods: List[Dict[str, Any]], as_of: str, is_bank: bool = False) -> Optional[Dict[str, Any]]:
@@ -171,6 +193,7 @@ def factors(periods: List[Dict[str, Any]], prices: List[Tuple[str, float, float]
         "current_ratio": None if is_bank else _div(_v(bal, "cur_assets"), _v(bal, "cur_liab")),
         "interest_coverage": None if is_bank else _div(op, abs(_v(last_ann, "interest") or 0) or None),
         "fscore": fs["score_9"] if fs else None, "fscore_detail": fs,
+        "sue": sue(periods, as_of),
         "momentum_6_1": momentum_6_1(closes), "volatility": vol,
     }
 

@@ -35,6 +35,13 @@ TOKEN_TTL_FALLBACK = 8 * 3600
 # Profile blocks requested: only what is needed to find sub-accounts, no personal details.
 PROFILE_FIELDS = "basicInfo,bankSubAccounts"
 STOCK_ACCOUNT_TYPES = {"NORMAL", "MARGIN"}
+LEDGER_FILE = os.path.join(RUNTIME_DIR, "tcbs_cash_ledger.json")
+# Cash-statement transaction codes seen on real accounts: 1141 bank credit (deposit), 1162 deposit
+# interest, 1182 monthly custody fee, 1201/1202 cash adjustments. Flows are classified by NAME below.
+CASH_CODES = ("1141", "1162", "1182", "1201", "1202")
+LEDGER_FIRST_DAYS = 730
+DEPOSIT_WORDS = ("báo có", "nộp tiền", "nhận tiền", "chuyển tiền vào", "nạp tiền")
+WITHDRAW_WORDS = ("chuyển tiền ra", "rút tiền", "báo nợ", "chuyển khoản ra", "chuyển tiền đi")
 # Keys holding personal data that must never be stored in the snapshot or sent to an LLM.
 PII_KEYS = {"fullName", "fullNameNoAccent", "custodyID", "custodyCode", "personalInfo",
             "personalBasicInfo", "bankAccounts", "accountName", "email", "phoneNumber",
@@ -239,6 +246,11 @@ def sync(custody_code: Optional[str] = None) -> Dict[str, Any]:
                 errors.append(f"{mask_account(acct)} risk: {e}")
         accounts.append(entry)
 
+    try:  # exact deposits/withdrawals for TWR; never fail a sync over it
+        sync_cash_ledger(token, [s["accountNo"] for s in stock_accounts if (s.get("accountType") or "").upper() == "NORMAL"], errors)
+    except TcbsError as e:
+        if e.needs_login:
+            raise
     snapshot = {"synced_at": datetime.now().isoformat(timespec="seconds"), "accounts": accounts, "errors": errors,
                 "skipped_account_types": skipped}
     _write_private(SNAPSHOT_FILE, snapshot)
@@ -252,6 +264,92 @@ def sync(custody_code: Optional[str] = None) -> Dict[str, Any]:
         except Exception as e:  # bonuses; never fail the sync over them
             snapshot["errors"].append(f"{label}: {e.__class__.__name__}")
     return snapshot
+
+
+def flow_of(entry: Dict[str, Any]) -> Optional[float]:
+    """External cash flow of a ledger entry: + deposit, − withdrawal, None for everything else
+    (interest, fees and adjustments are performance items, not flows)."""
+    name = (entry.get("name") or "").lower()
+    if any(w in name for w in DEPOSIT_WORDS) or any(w in name for w in WITHDRAW_WORDS):
+        return float(entry.get("credit") or 0) - float(entry.get("debit") or 0)
+    return None
+
+
+def load_ledger() -> Dict[str, Any]:
+    led = _read_json(LEDGER_FILE) or {}
+    led.setdefault("entries", {})
+    return led
+
+
+def sync_cash_ledger(token: str, account_nos: List[str], errors: List[str]) -> int:
+    """Append new cash-statement lines (TCBS 4.16) to the ledger. Descriptions and account numbers
+    are never stored. First run backfills two years; later runs re-read a few days for safety."""
+    led = load_ledger()
+    end = date.today()
+    start = (date.fromisoformat(led["covered_to"]) - timedelta(days=5)) if led.get("covered_to") else end - timedelta(days=LEDGER_FIRST_DAYS)
+    added = 0
+    for acct in account_nos:
+        for code in CASH_CODES:
+            for page in range(1, 11):
+                try:
+                    r = _get("/erebos/v2/digital/trans-hist-cashStatements", token,
+                             {"acctno": acct, "fromDate": start.isoformat(), "toDate": end.isoformat(),
+                              "pageSize": 100, "pageIndex": page, "transactionCode": code})
+                except TcbsError as e:
+                    if e.needs_login:
+                        raise
+                    errors.append(f"{mask_account(acct)} cash-statement {code}: {e}")
+                    break
+                rows = ((r or {}).get("response") or {}).get("data") or []
+                for row in rows:
+                    day = str(row.get("businessDate") or row.get("transationDate") or "")[:10]
+                    if not day:
+                        continue
+                    key = f"{mask_account(acct)}:{code}:{row.get('transactionNum')}:{day}"
+                    if key not in led["entries"]:
+                        led["entries"][key] = {"d": day, "code": code, "name": row.get("transactionName"),
+                                               "credit": _num(row.get("creditAmount")), "debit": _num(row.get("debitAmount"))}
+                        added += 1
+                if len(rows) < 100:
+                    break
+                time.sleep(0.12)
+            time.sleep(0.12)  # stay under TCBS's ~10 requests/second guideline
+    led["covered_to"] = end.isoformat()
+    led.setdefault("covered_from", start.isoformat() if not led.get("covered_from") else led["covered_from"])
+    _write_private(LEDGER_FILE, led)
+    return added
+
+
+def ledger_flows(ledger: Optional[Dict[str, Any]] = None) -> Dict[str, float]:
+    """{date: net external flow}; only days inside the covered range are trustworthy."""
+    led = ledger if ledger is not None else load_ledger()
+    out: Dict[str, float] = {}
+    for e in led.get("entries", {}).values():
+        f = flow_of(e)
+        if f:
+            out[e["d"]] = out.get(e["d"], 0.0) + f
+    return out
+
+
+def ledger_summary(ledger: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    led = ledger if ledger is not None else load_ledger()
+    if not led.get("entries"):
+        return None
+    dep = wd = fees = interest = other = 0.0
+    for e in led["entries"].values():
+        f = flow_of(e)
+        if f is not None:
+            dep += max(f, 0.0)
+            wd += -min(f, 0.0)
+        elif e["code"] == "1182":
+            fees += float(e.get("debit") or 0) - float(e.get("credit") or 0)
+        elif e["code"] == "1162":
+            interest += float(e.get("credit") or 0) - float(e.get("debit") or 0)
+        else:
+            other += float(e.get("credit") or 0) - float(e.get("debit") or 0)
+    return {"from": led.get("covered_from"), "to": led.get("covered_to"), "deposits": round(dep), "withdrawals": round(wd),
+            "custody_fees": round(fees), "interest": round(interest), "other_adjustments": round(other),
+            "entries": len(led["entries"])}
 
 
 def load_snapshot() -> Optional[Dict[str, Any]]:

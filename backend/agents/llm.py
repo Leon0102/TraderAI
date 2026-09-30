@@ -191,7 +191,7 @@ def score_signals(context: Dict[str, Any]) -> Tuple[int, List[str], List[str]]:
             f"Khối lượng đột biến {vol_ratio}x TB20 phiên kèm giá {'tăng' if chg5 >= 0 else 'giảm'} {chg5}%/5 phiên — dấu hiệu {'dòng tiền lớn gom hàng' if chg5 >= 0 else 'phân phối'}"
         )
 
-    pe, pb, roe = f.get("pe"), f.get("pb"), f.get("roe")
+    pe, roe = f.get("pe"), f.get("roe")
     if pe and pe > 0:
         if pe < 10:
             bull.append(f"P/E {pe}x thấp hơn mặt bằng VN-Index (~12-15x) — định giá hấp dẫn")

@@ -75,7 +75,7 @@ def _vci_post(path: str, payload: dict, ttl: float = 0) -> Optional[dict]:
     return None
 
 
-def _vci_get(url: str, params: Optional[dict] = None, ttl: float = 0) -> Optional[dict]:
+def _vci_get(url: str, params: Optional[dict] = None, ttl: float = 0, timeout: float = 10) -> Optional[dict]:
     cache_key = f"vci:get:{url}:{params}"
     if ttl:
         cached = cache_get(cache_key)
@@ -83,7 +83,7 @@ def _vci_get(url: str, params: Optional[dict] = None, ttl: float = 0) -> Optiona
             return cached
     try:
         import requests as req
-        resp = req.get(url, headers=HEADERS, params=params, timeout=10)
+        resp = req.get(url, headers=HEADERS, params=params, timeout=timeout)
         if resp.status_code == 200:
             data = resp.json()
             return cache_set(cache_key, data, ttl) if ttl else data
@@ -171,7 +171,7 @@ def price_board(symbols: list) -> list:
 
 def company_info(symbol: str) -> Optional[dict]:
     """Company profile: ICB sector, analyst rating/target price, dividend per share."""
-    data = _vci_get(f"{IQ_URL}/v1/company/{symbol}", ttl=3600)
+    data = _vci_get(f"{IQ_URL}/v1/company/{symbol}", ttl=3600, timeout=6)
     info = (data or {}).get("data")
     return info if isinstance(info, dict) else None
 
@@ -207,7 +207,7 @@ def company_news(symbol: str, days: int = 60, size: int = 15) -> list:
     data = _vci_get(
         f"{IQ_URL}/v1/news",
         params={"ticker": symbol, "fromDate": from_date, "toDate": to_date, "languageId": 1, "page": 0, "size": size},
-        ttl=180,
+        ttl=180, timeout=5,
     )
     if not data:
         return []

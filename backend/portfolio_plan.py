@@ -355,19 +355,25 @@ def plan_brief(plan: Dict[str, Any]) -> str:
 # ---------- network ----------
 
 def fetch_market_data(tickers: List[str]) -> Dict[str, Dict[str, Any]]:
-    """~1 year of daily closes (VND), technical indicators and dividend yield per ticker."""
+    """~1 year of daily closes (VND), technical indicators and dividend yield per ticker.
+
+    Fetched in parallel; the dividend yield comes from the local database (annual DPS / price)
+    and only falls back to the slow Vietcap ratio call for tickers the database lacks."""
     api_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "api"))
     if api_dir not in sys.path:
         sys.path.append(api_dir)  # append: api/agents.py must not shadow the backend agents package
     from agents.tools import calculate_indicators, _to_vnd  # before api/: its agents.py shadows the package
+    from concurrent.futures import ThreadPoolExecutor
     from history import get_history
     from finance import get_finance
+    from company_cache import cached_profiles
 
     end = datetime.now().strftime("%Y-%m-%d")
     start = (datetime.now() - timedelta(days=380)).strftime("%Y-%m-%d")
-    out: Dict[str, Dict[str, Any]] = {}
-    for t in tickers:
-        bars = []
+    profiles = cached_profiles(tickers)
+
+    def one(t: str) -> Dict[str, Any]:
+        bars: List[Dict[str, Any]] = []
         try:
             bars = (get_history(t, start, end) or {}).get("data") or []
         except Exception:
@@ -375,9 +381,15 @@ def fetch_market_data(tickers: List[str]) -> Dict[str, Dict[str, Any]]:
         closes: List[Tuple[str, float]] = [(b.get("tradingDate", ""), _to_vnd(float(b["close"])))
                                            for b in bars if b.get("close")]
         dy = None
-        try:
-            dy = ((get_finance(t) or {}).get("data") or {}).get("dividendYield") or None  # 0 means unknown
-        except Exception:
-            pass
-        out[t] = {"closes": closes, "tech": calculate_indicators(bars) if bars else {}, "dividend_yield": dy}
-    return out
+        dps = (profiles.get(t) or {}).get("dividendPerShareTsr")
+        if dps and closes:
+            dy = round(dps / closes[-1][1] * 100, 2)
+        elif t not in profiles:
+            try:
+                dy = ((get_finance(t) or {}).get("data") or {}).get("dividendYield") or None  # 0 means unknown
+            except Exception:
+                pass
+        return {"closes": closes, "tech": calculate_indicators(bars) if bars else {}, "dividend_yield": dy}
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        return dict(zip(tickers, pool.map(one, tickers)))

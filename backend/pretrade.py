@@ -12,6 +12,9 @@ import numpy as np
 
 import risk_tools as rt
 
+LIQUIDITY_TARGET = 0.05     # order ≤ 5% of average daily traded value
+LIQUIDITY_FAIL = 0.15       # above this the order itself moves the price
+LOW_LIQUIDITY = 2_000_000_000
 EVENT_WORDS = ("đăng ký cuối cùng", "không hưởng quyền", "gdkhq", "cổ tức", "chốt quyền")
 
 
@@ -27,7 +30,8 @@ def _check(status: str, name: str, text: str) -> Dict[str, str]:
 def run_checks(analysis: Dict[str, Any], rules: Dict[str, Any], ticker: str, price: float, stop: float,
                target: Optional[float], quantity: Optional[int], company: Dict[str, Any],
                sectors: Dict[str, str], closes: Dict[str, List[Tuple[str, float]]], forecast: Optional[Dict[str, Any]],
-               regime: Optional[Dict[str, Any]], news: List[Dict[str, Any]]) -> Dict[str, Any]:
+               regime: Optional[Dict[str, Any]], news: List[Dict[str, Any]],
+               adv_value: Optional[float] = None) -> Dict[str, Any]:
     s = analysis["summary"]
     nav, cash = s["nav"], s["cash"]
     holdings = {h["ticker"]: h for h in analysis["holdings"]}
@@ -42,6 +46,10 @@ def run_checks(analysis: Dict[str, Any], rules: Dict[str, Any], ticker: str, pri
 
     size = rt.position_size(nav, price, stop, rules["max_risk_per_trade_pct"], rules["max_weight_pct"] / 100, cash)
     qty = quantity or size["shares"]
+    liq_cap = int(math.floor(LIQUIDITY_TARGET * adv_value / price / 100) * 100) if adv_value else None
+    if not quantity and liq_cap is not None and qty > liq_cap:
+        qty = liq_cap                       # never size a new position beyond what the market can absorb
+        size = {**size, "shares": qty, "value": round(qty * price), "limited_by": "thanh khoản"}
     risk_pct = qty * (price - stop) / nav * 100 if nav else 0
     if quantity:
         status = "PASS" if risk_pct <= rules["max_risk_per_trade_pct"] * 1.05 else "FAIL"
@@ -59,6 +67,17 @@ def run_checks(analysis: Dict[str, Any], rules: Dict[str, Any], ticker: str, pri
                              f"R:R = {rr:.2f}{src}; nên ≥ 1.5."))
     else:
         checks.append(_check("WARN", "Lợi nhuận / rủi ro", "Chưa có giá mục tiêu hợp lệ để tính R:R."))
+
+    if adv_value:
+        share = qty * price / adv_value
+        status = "PASS" if share <= LIQUIDITY_TARGET else "WARN" if share <= LIQUIDITY_FAIL else "FAIL"
+        checks.append(_check(status, "Thanh khoản",
+                             f"Lệnh {_n(qty * price)} đ = {share * 100:.1f}% giá trị giao dịch bình quân 20 phiên ({_n(adv_value)} đ/phiên). "
+                             f"Nên ≤ {int(LIQUIDITY_TARGET * 100)}% (~{_n(liq_cap or 0)} cp); trên {int(LIQUIDITY_FAIL * 100)}% khó vào/thoát lệnh mà không đẩy giá."))
+        if adv_value < LOW_LIQUIDITY:
+            checks.append(_check("WARN", "Mã kém thanh khoản", f"Giá trị giao dịch bình quân chỉ {_n(adv_value)} đ/phiên (< {_n(LOW_LIQUIDITY)} đ)."))
+    else:
+        checks.append(_check("WARN", "Thanh khoản", "Chưa có dữ liệu giao dịch của mã này (nạp dữ liệu ở mục Định lượng) — hãy tự kiểm tra khối lượng khớp thường ngày."))
 
     held = holdings.get(ticker)
     new_value = (held["market_value"] if held else 0) + qty * price

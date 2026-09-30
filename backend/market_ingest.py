@@ -48,6 +48,7 @@ def ingest_universe() -> List[Dict[str, Any]]:
     from stocks import get_symbols
     rows = [r for r in (get_symbols() or {}).get("data", []) if r.get("ticker") and r.get("exchange") in ("HOSE", "HNX", "UPCOM")]
     db.upsert_universe([{"ticker": r["ticker"], "exchange": r["exchange"], "name": r.get("name")} for r in rows])
+    db.record_universe(date.today().isoformat(), rows)  # survivorship-free universe accumulates from today
     return rows
 
 

@@ -27,6 +27,7 @@ LIQUID_VALUE = 1_000_000_000
 FACTORS = {
     "overall": ("Điểm tổng hợp A–F", True, True),
     "value_combo": ("Giá trị kết hợp (E/P + B/P)", True, True),
+    "sue": ("Bất ngờ lợi nhuận quý (SUE)", True, True),
     "fscore": ("Piotroski F-score", True, True),
     "earnings_yield": ("Lợi nhuận/giá (E/P)", True, True),
     "book_to_price": ("Giá trị sổ sách/giá (B/P)", True, True),
@@ -45,6 +46,12 @@ def _rank_pct(values: Dict[str, Optional[float]]) -> Dict[str, float]:
     items = sorted(((t, v) for t, v in values.items() if v is not None and math.isfinite(v)), key=lambda kv: kv[1])
     n = len(items)
     return {t: i / (n - 1) for i, (t, _) in enumerate(items)} if n > 1 else {}
+
+
+def _div_yield(dps: Dict[str, float], series: Dict[str, Dict[str, float]], tickers: List[str], day: str) -> float:
+    """Average monthly dividend yield of `tickers` at `day` (annual DPS / price / 12); unknown DPS counts as 0."""
+    ys = [(dps.get(t) or 0.0) / series[t][day] / 12 for t in tickers if series.get(t, {}).get(day)]
+    return sum(ys) / len(ys) if ys else 0.0
 
 
 def _curve_stats(rets: List[float]) -> Dict[str, Optional[float]]:
@@ -120,6 +127,7 @@ def run(years: int = 4, min_names: int = 25) -> Dict[str, Any]:
     monthly: Dict[str, Dict[str, List[float]]] = {f: {"top_excess": [], "spread": [], "ic": [], "net": [], "vs_market": []} for f in FACTORS}
     strat: Dict[str, List[Dict[str, Any]]] = {k: [] for k in STRATEGIES}
     prev_picks: Dict[str, set] = {k: set() for k in STRATEGIES}
+    dps = {u["ticker"]: float(u["dps"]) for u in db.universe() if u.get("dps")}  # today's DPS, applied historically
     ew_market: List[Dict[str, Any]] = []
     vn_market: List[Dict[str, Any]] = []
     index_px = dict((d, c) for d, c, _ in db.price_panel(["VNINDEX"], since=since).get("VNINDEX", []))
@@ -172,8 +180,9 @@ def run(years: int = 4, min_names: int = 25) -> Dict[str, Any]:
                 continue
             churn = 1.0 if not prev_picks[key] else len(set(picks) - prev_picks[key]) / len(picks)
             prev_picks[key] = set(picks)
-            strat[key].append({"month": m1, "ret": sum(fwd[t] for t in picks) / len(picks) - churn * COST_PER_TURNOVER, "picks": picks})
-        ew_market.append({"month": m1, "ret": market})
+            price_ret = sum(fwd[t] for t in picks) / len(picks) - churn * COST_PER_TURNOVER
+            strat[key].append({"month": m1, "ret": price_ret, "total": price_ret + _div_yield(dps, series, picks, m0), "picks": picks})
+        ew_market.append({"month": m1, "ret": market, "total": market + _div_yield(dps, series, eligible, m0)})
         if index_px.get(m0) and index_px.get(m1):
             vn_market.append({"month": m1, "ret": index_px[m1] / index_px[m0] - 1})
         split: Dict[str, Tuple[set, set]] = {}
@@ -230,15 +239,17 @@ def run(years: int = 4, min_names: int = 25) -> Dict[str, Any]:
     months_all = [m["month"] for m in ew_market]
     out["strategies"] = {
         "size": STRATEGY_SIZE,
-        "benchmarks": {"vnindex": {"label": "VN-Index", "stats": _curve_stats([m["ret"] for m in vn_market]), "monthly": vn_market},
-                       "equal_weight": {"label": "Trung bình mã thanh khoản", "stats": _curve_stats([m["ret"] for m in ew_market]), "monthly": ew_market}},
+        "benchmarks": {"vnindex": {"label": "VN-Index (chỉ số giá)", "stats": _curve_stats([m["ret"] for m in vn_market]), "monthly": vn_market},
+                       "equal_weight": {"label": "Trung bình mã thanh khoản", "stats": _curve_stats([m["ret"] for m in ew_market]),
+                                        "total_stats": _curve_stats([m["total"] for m in ew_market]), "monthly": ew_market}},
         "models": {k: {"label": label, "stats": _curve_stats([m["ret"] for m in strat[k]]),
+                       "total_stats": _curve_stats([m["total"] for m in strat[k]]),
                        "monthly": [{"month": m["month"], "ret": round(m["ret"], 5)} for m in strat[k]],
                        "latest_picks": strat[k][-1]["picks"] if strat[k] else [],
                        "beat_vnindex_pct": round(sum(1 for a, b in zip(strat[k], vn_market) if a["ret"] > b["ret"]) / len(strat[k]) * 100, 1) if strat[k] and vn_market else None}
                    for k, label in STRATEGIES.items()},
         "months": months_all,
-        "note": "Mua đều 10 mã điểm cao nhất vào cuối mỗi tháng, giữ 1 tháng, đã trừ phí 0,3% trên phần danh mục thay đổi. Không tính cổ tức (thiệt cho danh mục giá trị) và vẫn có thiên lệch sống sót.",
+        "note": "Mua đều 10 mã điểm cao nhất vào cuối mỗi tháng, giữ 1 tháng, đã trừ phí 0,3% trên phần danh mục thay đổi. Cột “có cổ tức” cộng cổ tức ước tính bằng DPS hiện tại của từng mã áp cho quá khứ (gần đúng, hơi lạc quan); VN-Index là chỉ số giá, không gồm cổ tức. Vẫn có thiên lệch sống sót.",
     }
     db.set_job("validation", out)
     db.set_job("factor_series", {"series": factor_daily})

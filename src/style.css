@@ -4813,3 +4813,10 @@ main section[id] { scroll-margin-top: 90px; }
 .metric-sub { display: block; font-size: .72rem; color: var(--text-muted); margin-top: .2rem; }
 .capital-preset-tcbs { border-color: var(--green-border) !important; color: var(--green-light) !important; }
 .portfolio-table .tcbs-badge { font-size: .6rem; margin-left: .3rem; }
+.attr-rows { display: grid; gap: .3rem; }
+.attr-row { display: grid; grid-template-columns: minmax(6rem, 9rem) 1fr 6.5rem; align-items: center; gap: .5rem; font-size: .78rem; }
+.attr-row small { color: var(--text-muted); font-size: .66rem; }
+.attr-row b:last-child { font-family: var(--font-mono); font-weight: 500; text-align: right; }
+.attr-bar { display: block; height: 6px; border-radius: 3px; }
+.attr-bar.up { background: var(--green); } .attr-bar.down { background: var(--red); }
+.attr-sectors { display: flex; flex-wrap: wrap; gap: .3rem; }

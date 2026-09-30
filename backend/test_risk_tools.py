@@ -3,7 +3,6 @@ Offline tests for risk tools (sizing, risk parity, stress tests, rule backtest) 
 Run: python3 backend/test_risk_tools.py   (from project root)
 """
 
-import math
 import os
 import sys
 import tempfile

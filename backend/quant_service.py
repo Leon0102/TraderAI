@@ -33,6 +33,17 @@ def invalidate() -> None:
     _cache.clear()
 
 
+def warm() -> None:
+    """Compute the scores in a background thread so the first screen does not wait ~15 s."""
+    def job():
+        try:
+            if available():
+                scores()
+        except Exception as e:  # cache warming is best effort
+            print(f"quant warm-up skipped: {e!r}", flush=True)
+    threading.Thread(target=job, daemon=True, name="quant-warm").start()
+
+
 def available() -> bool:
     try:
         return db.counts()["prices"] > 0
@@ -181,6 +192,98 @@ def local_finance(ticker: str) -> Optional[Dict[str, Any]]:
             "industry": u.get("sector") or ""}
 
 
+# ---------- forward test of the model portfolios ----------
+
+MODELS = {"overall": "Top 10 theo điểm tổng hợp", "value_combo": "Top 10 theo giá trị kết hợp"}
+PICKS = 10
+COST = 0.003
+
+
+def model_picks() -> Dict[str, List[Dict[str, Any]]]:
+    """Today's picks for each model, exactly as the backtest defines them."""
+    import factor_validation as fv
+    s = scores()
+    raw, graded = s["raw"], s["graded"]
+    usable = {t: f for t, f in raw.items() if f.get("volatility") is not None}    # enough price history
+    ep, bp = fv._rank_pct({t: f.get("earnings_yield") for t, f in usable.items()}), fv._rank_pct({t: f.get("book_to_price") for t, f in usable.items()})
+    scoring = {"overall": {t: graded[t]["overall_pct"] for t in usable if graded.get(t, {}).get("overall_pct") is not None},
+               "value_combo": {t: (ep[t] + bp[t]) / 2 for t in usable if t in ep and t in bp}}
+    return {m: [{"ticker": t, "price": usable[t]["price"], "score": round(v, 3)}
+                for t, v in sorted(sc_.items(), key=lambda kv: -kv[1])[:PICKS]] for m, sc_ in scoring.items()}
+
+
+def record_forward(today: Optional[date] = None) -> Dict[str, Any]:
+    """Freeze this month's picks (once per month) — the honest, out-of-sample record."""
+    today = today or date.today()
+    month = today.strftime("%Y-%m")
+    # Entry is the last close we actually have — label it with that session's date, not the calendar
+    # day the job ran (the market may not have closed yet).
+    entry_date = min(today.isoformat(), db.last_price_date("VNINDEX") or today.isoformat())
+    saved = {}
+    picks = None
+    for model in MODELS:
+        if db.has_picks(month, model):
+            continue
+        picks = picks or model_picks()
+        db.save_picks(month, model, entry_date, picks[model])
+        saved[model] = [p["ticker"] for p in picks[model]]
+    return {"month": month, "saved": saved}
+
+
+def forward_status(today: Optional[date] = None) -> Dict[str, Any]:
+    """Return of each frozen month: entry → next entry (or today), equal weight, net of turnover costs, vs VN-Index."""
+    today = today or date.today()
+    recorded = db.forward_picks()
+    tickers = sorted({p["ticker"] for months in recorded.values() for ps in months.values() for p in ps})
+    panel = db.price_panel(tickers + ["VNINDEX"], since=(today - timedelta(days=400)).isoformat())
+    last_px = {t: rows[-1] for t, rows in panel.items() if rows}
+
+    def px_on(t: str, day: str) -> Optional[float]:
+        rows = [c for d, c, _ in panel.get(t, []) if d <= day]
+        return rows[-1] if rows else None
+
+    out = {}
+    for model, months in recorded.items():
+        keys = sorted(months)
+        rows, prev = [], set()
+        for i, m in enumerate(keys):
+            ps = months[m]
+            start = ps[0]["entry_date"]
+            end = months[keys[i + 1]][0]["entry_date"] if i + 1 < len(keys) else (last_px["VNINDEX"][0] if "VNINDEX" in last_px else start)
+            rets = []
+            for p in ps:
+                now = px_on(p["ticker"], end)
+                if now and p["entry_price"]:
+                    rets.append(now / p["entry_price"] - 1)
+            if not rets:
+                continue
+            names = {p["ticker"] for p in ps}
+            churn = 1.0 if not prev else len(names - prev) / len(names)
+            prev = names
+            if end <= start:            # no session after entry yet: nothing to measure
+                rows.append({"month": m, "start": start, "end": end, "open": True, "picks": [p["ticker"] for p in ps],
+                             "ret_pct": None, "vnindex_pct": None, "excess_pct": None, "waiting": True})
+                continue
+            i0, i1 = px_on("VNINDEX", start), px_on("VNINDEX", end)
+            ret = sum(rets) / len(rets) - churn * COST
+            vn = (i1 / i0 - 1) if i0 and i1 else None
+            rows.append({"month": m, "start": start, "end": end, "open": i + 1 == len(keys), "picks": [p["ticker"] for p in ps],
+                         "ret_pct": round(ret * 100, 2), "vnindex_pct": round(vn * 100, 2) if vn is not None else None,
+                         "excess_pct": round((ret - vn) * 100, 2) if vn is not None else None})
+        eq = vn_eq = 1.0
+        for r in rows:
+            if r["ret_pct"] is None:
+                continue
+            eq *= 1 + r["ret_pct"] / 100
+            vn_eq *= 1 + (r["vnindex_pct"] or 0) / 100
+        out[model] = {"label": MODELS.get(model, model), "months": rows, "cumulative_pct": round((eq - 1) * 100, 2) if rows else None,
+                      "vnindex_cumulative_pct": round((vn_eq - 1) * 100, 2) if rows else None,
+                      "live_days": (today - date.fromisoformat(rows[0]["start"])).days if rows else 0}
+    snaps = db.universe_snapshot_days()
+    return {"models": out, "universe_snapshot_days": len(snaps), "first_snapshot": snaps[0] if snaps else None,
+            "note": "Danh mục được chốt ngay lúc nạp dữ liệu đầu tháng (giá đóng cửa hôm đó) và không bao giờ sửa lại — đây là kết quả ngoài mẫu thật, không phải backtest."}
+
+
 # ---------- validation ----------
 
 def validation_summary() -> Optional[Dict[str, Any]]:
@@ -255,8 +358,11 @@ def run_pipeline(quick: bool = False) -> Dict[str, Any]:
             import factor_validation
             factor_validation.run()
         invalidate()
+        warm()
         if not quick:
             info["grades_snapshot"] = snapshot_grades()
+            info["forward"] = record_forward()
+            db.set_job("ingest", info)      # market_ingest saved it before these steps ran
         return info
     finally:
         _job_lock.release()

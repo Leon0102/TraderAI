@@ -207,7 +207,7 @@ def backtest_rules(closes: List[float]) -> Optional[Dict[str, Any]]:
 
 def build_risk(analysis: Dict[str, Any], plan: Dict[str, Any], closes: Dict[str, List[Tuple[str, float]]],
                forecasts: Dict[str, Any], betas: Dict[str, Optional[float]], risk_pct: float = 1.0) -> Dict[str, Any]:
-    nav, cash = analysis["summary"]["nav"], analysis["summary"]["cash"]
+    nav = analysis["summary"]["nav"]
     holdings = analysis["holdings"]
     sizing = []
     for p in plan["positions"]:

@@ -61,6 +61,29 @@ def test_paths_and_redirects():
     assert "&lt;script&gt;" in ag.login_page("/", "<script>")
 
 
+def test_rate_limiter():
+    ag._failures.clear()
+    t0 = 1_000_000.0
+    key = ag.client_key("6.6.6.6, 203.0.113.9", "172.30.57.2")
+    assert key == "203.0.113.9", "the client cannot forge the address our proxy appended"
+    assert ag.client_key(None, "127.0.0.1") == "127.0.0.1"
+    for i in range(ag.MAX_FAILURES - 1):
+        ag.record_failure(key, t0 + i)
+    assert ag.retry_after(key, t0 + 10) == 0, "still allowed below the limit"
+    ag.record_failure(key, t0 + 10)
+    wait = ag.retry_after(key, t0 + 20)
+    assert 0 < wait <= ag.WINDOW_SECONDS
+    assert ag.retry_after("198.51.100.1", t0 + 20) == 0, "another client is unaffected"
+    assert ag.retry_after(key, t0 + ag.WINDOW_SECONDS + 20) == 0, "the window expires"
+    ag.clear_failures(key)
+    assert ag.retry_after(key, t0 + 20) == 0
+    ag._failures.clear()
+    for i in range(ag.MAX_FAILURES_TOTAL):
+        ag.record_failure(f"10.0.0.{i}", t0 + i)     # one attempt each: a distributed guess
+    assert ag.retry_after("192.0.2.77", t0 + 40) > 0, "global cap blocks new clients too"
+    ag._failures.clear()
+
+
 def main():
     saved = {k: os.environ.get(k) for k in ("APP_PASSWORD", "AUTH_SECRET")}
     try:

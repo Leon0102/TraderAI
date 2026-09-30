@@ -35,6 +35,10 @@ SCHEMA = [
     """CREATE TABLE IF NOT EXISTS jobs (name TEXT PRIMARY KEY, updated_at TEXT, info TEXT)""",
     """CREATE TABLE IF NOT EXISTS target_history (
         ticker TEXT NOT NULL, d TEXT NOT NULL, target_price REAL, rating TEXT, PRIMARY KEY (ticker, d))""",
+    """CREATE TABLE IF NOT EXISTS universe_snapshots (d TEXT NOT NULL, ticker TEXT NOT NULL, exchange TEXT, PRIMARY KEY (d, ticker))""",
+    """CREATE TABLE IF NOT EXISTS forward_picks (
+        month TEXT NOT NULL, model TEXT NOT NULL, ticker TEXT NOT NULL, rank INTEGER, entry_date TEXT, entry_price REAL,
+        PRIMARY KEY (month, model, ticker))""",
     """CREATE TABLE IF NOT EXISTS grades_history (
         ticker TEXT NOT NULL, d TEXT NOT NULL, overall_pct REAL, overall TEXT, value TEXT, quality TEXT,
         growth TEXT, health TEXT, momentum TEXT, PRIMARY KEY (ticker, d))""",
@@ -264,6 +268,41 @@ def grade_history(ticker: str) -> List[Dict[str, Any]]:
     with connect() as c:
         return [dict(zip(cols, r)) for r in c.execute(
             f"SELECT {', '.join(cols)} FROM grades_history WHERE ticker = ? ORDER BY d", (ticker,))]
+
+
+def record_universe(day: str, rows: List[Dict[str, Any]]) -> int:
+    """Daily list of what is listed: builds a survivorship-free universe from now on."""
+    vals = [(day, r["ticker"], r.get("exchange")) for r in rows if r.get("ticker")]
+    with connect() as c:
+        c.executemany("INSERT INTO universe_snapshots (d, ticker, exchange) VALUES (?, ?, ?) ON CONFLICT (d, ticker) DO NOTHING", vals)
+    return len(vals)
+
+
+def universe_snapshot_days() -> List[str]:
+    with connect() as c:
+        return [r[0] for r in c.execute("SELECT DISTINCT d FROM universe_snapshots ORDER BY d")]
+
+
+def has_picks(month: str, model: str) -> bool:
+    with connect() as c:
+        return bool(c.execute("SELECT 1 FROM forward_picks WHERE month = ? AND model = ? LIMIT 1", (month, model)))
+
+
+def save_picks(month: str, model: str, entry_date: str, picks: List[Dict[str, Any]]) -> None:
+    with connect() as c:
+        c.executemany("INSERT INTO forward_picks (month, model, ticker, rank, entry_date, entry_price) VALUES (?, ?, ?, ?, ?, ?) "
+                      "ON CONFLICT (month, model, ticker) DO NOTHING",
+                      [(month, model, p["ticker"], i + 1, entry_date, p["price"]) for i, p in enumerate(picks)])
+
+
+def forward_picks() -> Dict[str, Dict[str, List[Dict[str, Any]]]]:
+    """{model: {month: [{ticker, rank, entry_date, entry_price}]}}"""
+    out: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
+    with connect() as c:
+        for month, model, ticker, rank, d, price in c.execute(
+                "SELECT month, model, ticker, rank, entry_date, entry_price FROM forward_picks ORDER BY model, month, rank"):
+            out.setdefault(model, {}).setdefault(month, []).append({"ticker": ticker, "rank": rank, "entry_date": d, "entry_price": float(price)})
+    return out
 
 
 def counts() -> Dict[str, int]:

@@ -201,7 +201,8 @@ export async function renderStockQuantCard(ticker: string, el: HTMLElement) {
 
 // ---------- validation & data tabs ----------
 
-type Curve = { label: string; stats: { cagr_pct: number | null; vol_pct: number | null; sharpe: number | null; max_dd_pct: number | null; total_pct: number | null }; monthly: Array<{ month: string; ret: number }>; latest_picks?: string[]; beat_vnindex_pct?: number | null };
+type CurveStats = { cagr_pct: number | null; vol_pct: number | null; sharpe: number | null; max_dd_pct: number | null; total_pct: number | null };
+type Curve = { label: string; stats: CurveStats; total_stats?: CurveStats; monthly: Array<{ month: string; ret: number }>; latest_picks?: string[]; beat_vnindex_pct?: number | null };
 type Strategies = { size: number; benchmarks: Record<string, Curve>; models: Record<string, Curve>; note: string };
 type Validation = { strategies?: Strategies; results: Array<{ factor: string; label: string; months: number; verdict: string; net_excess: { mean_pct: number | null; t: number | null; hit_pct: number | null; annual_pct: number | null }; long_short: { mean_pct: number | null }; vs_all_market: { annual_pct: number | null }; ic_mean: number | null }>; months: number; avg_eligible: number; from: string; to: string; cost_per_turnover_pct: number; caveat: string; updated_at: string };
 
@@ -217,6 +218,8 @@ async function loadValidation() {
       <p class="form-hint">"Có bằng chứng" = t ≥ 2. ${esc(v.caveat)} Kiểm định lúc ${esc(v.updated_at)}.</p>
       ${v.strategies ? renderStrategies(v.strategies) : ''}`;
     if (v.strategies) drawStrategies(v.strategies);
+    getJson<Forward>('/api/quant/forward').then(f => { box.insertAdjacentHTML('beforeend', renderForward(f)); }).catch(e => console.warn('forward test not shown:', e));
+    getJson<CouncilScore>('/api/quant/council-score').then(c => { box.insertAdjacentHTML('beforeend', renderCouncilScore(c)); }).catch(e => console.warn('council score not shown:', e));
     box.querySelectorAll<HTMLElement>('[data-pick]').forEach(b => b.addEventListener('click', async () => {
       await showTab('screener');  // resolves once the screener (and its card slot) is rendered
       const el = $('qCard');
@@ -227,14 +230,41 @@ async function loadValidation() {
   }
 }
 
+type ForwardMonth = { month: string; start: string; end: string; open: boolean; waiting?: boolean; picks: string[]; ret_pct: number | null; vnindex_pct: number | null; excess_pct: number | null };
+type Forward = { models: Record<string, { label: string; months: ForwardMonth[]; cumulative_pct: number | null; vnindex_cumulative_pct: number | null; live_days: number }>; universe_snapshot_days: number; first_snapshot: string | null; note: string };
+
+function renderForward(f: Forward): string {
+  const models = Object.values(f.models);
+  if (!models.length) return `<section class="insight-block"><h4>Theo dõi thực tế (forward test)</h4><p class="plan-note">Chưa có danh mục nào được chốt. Sau lần nạp dữ liệu đầy đủ đầu tiên của tháng, app sẽ ghi lại top 10 của từng mô hình và theo dõi kết quả thật từ đó.</p><p class="form-hint">${esc(f.note)}</p></section>`;
+  const rows = models.flatMap(m => m.months.map(r => `<tr><td>${esc(m.label)}</td><td>${esc(r.month)}${r.open ? ' <span class="plan-action medium">đang chạy</span>' : ''}</td><td>${esc(r.start)} → ${esc(r.end)}</td>${r.waiting ? '<td colspan="3" class="form-hint">chờ phiên giao dịch tiếp theo</td>' : `<td>${pct(r.ret_pct)}</td><td>${pct(r.vnindex_pct)}</td><td>${pct(r.excess_pct)}</td>`}<td class="q-sector">${r.picks.map(esc).join(' ')}</td></tr>`)).join('');
+  const sums = models.map(m => `<div><span>${esc(m.label)}</span><strong>${pct(m.cumulative_pct)}</strong><small>VN-Index ${pct(m.vnindex_cumulative_pct)} · ${m.live_days} ngày chạy thật</small></div>`).join('');
+  const short = models.every(m => m.live_days < 90);
+  return `<section class="insight-block"><h4>Theo dõi thực tế (forward test)</h4>
+    <div class="portfolio-summary tcbs-summary">${sums}</div>
+    <div class="portfolio-table-wrap"><table class="portfolio-table"><thead><tr><th>Mô hình</th><th>Tháng</th><th>Giai đoạn</th><th>Danh mục</th><th>VN-Index</th><th>Chênh lệch</th><th>Mã</th></tr></thead><tbody>${rows}</tbody></table></div>
+    ${short ? '<p class="tcbs-flag medium">Mới chạy dưới 3 tháng — chưa đủ để kết luận gì. Đây là bằng chứng ngoài mẫu duy nhất của app, hãy chờ ít nhất 6–12 tháng.</p>' : ''}
+    <p class="form-hint">${esc(f.note)} Danh sách mã niêm yết được lưu mỗi ngày từ ${esc(f.first_snapshot || 'hôm nay')} (${f.universe_snapshot_days} ngày) để về sau backtest không còn thiên lệch sống sót.</p></section>`;
+}
+
+type CouncilScore = { horizon_days: number; logged: number; scored: number; pending: number; verdict: string | null; by_action: Record<string, { n: number; avg_ret_pct: number; avg_excess_pct: number; right_pct: number | null }>; recent: Array<{ date: string; ticker: string; action: string; ret_pct: number; excess_pct: number }> };
+
+function renderCouncilScore(c: CouncilScore): string {
+  const rows = Object.entries(c.by_action).map(([a, r]) => `<tr><td><span class="plan-action ${a === 'MUA' ? 'info' : a === 'BÁN' ? 'high' : 'medium'}">${esc(a)}</span></td><td>${r.n}</td><td>${pct(r.avg_ret_pct)}</td><td>${pct(r.avg_excess_pct)}</td><td>${r.right_pct != null ? `${r.right_pct}%` : '—'}</td></tr>`).join('');
+  return `<section class="insight-block"><h4>Hội đồng AI đúng bao nhiêu?</h4>
+    <p class="plan-note">Mỗi phán quyết được ghi lại cùng giá ngày đó, rồi so với giá thật sau ${c.horizon_days} ngày và với VN-Index. Đã ghi ${c.logged}, có kết quả ${c.scored}, đang chờ ${c.pending}.</p>
+    ${rows ? `<div class="portfolio-table-wrap"><table class="portfolio-table"><thead><tr><th>Phán quyết</th><th>Số lượng</th><th>Lợi nhuận TB</th><th>So VN-Index</th><th>Đúng hướng</th></tr></thead><tbody>${rows}</tbody></table></div>` : ''}
+    ${c.verdict ? `<p class="tcbs-flag medium">${esc(c.verdict)}</p>` : ''}
+    <p class="form-hint">MUA "đúng" khi cổ phiếu thắng VN-Index, BÁN "đúng" khi thua VN-Index. QUAN SÁT không chấm hướng.</p></section>`;
+}
+
 const CURVE_COLORS: Record<string, string> = { vnindex: '#8E9CB4', equal_weight: '#69758A', overall: '#6E8FD6', value_combo: '#16C784' };
 
 function renderStrategies(st: Strategies): string {
-  const rows = [...Object.entries(st.models), ...Object.entries(st.benchmarks)].map(([k, c]) => `<tr><td><i class="dot" style="background:${CURVE_COLORS[k] || '#ccc'}"></i><strong>${esc(c.label)}</strong></td><td>${pct(c.stats.cagr_pct)}</td><td>${pct(c.stats.total_pct)}</td><td>${c.stats.vol_pct ?? '—'}%</td><td>${c.stats.sharpe ?? '—'}</td><td>${pct(c.stats.max_dd_pct)}</td><td>${c.beat_vnindex_pct != null ? `${c.beat_vnindex_pct}%` : '—'}</td></tr>`).join('');
+  const rows = [...Object.entries(st.models), ...Object.entries(st.benchmarks)].map(([k, c]) => `<tr><td><i class="dot" style="background:${CURVE_COLORS[k] || '#ccc'}"></i><strong>${esc(c.label)}</strong></td><td>${pct(c.stats.cagr_pct)}</td><td>${c.total_stats ? pct(c.total_stats.cagr_pct) : '—'}</td><td>${pct(c.stats.total_pct)}</td><td>${c.stats.vol_pct ?? '—'}%</td><td>${c.stats.sharpe ?? '—'}</td><td>${pct(c.stats.max_dd_pct)}</td><td>${c.beat_vnindex_pct != null ? `${c.beat_vnindex_pct}%` : '—'}</td></tr>`).join('');
   const picks = Object.entries(st.models).map(([, c]) => `<p class="plan-note"><b>${esc(c.label)}</b> — danh mục tháng này: ${(c.latest_picks || []).map(t => `<button class="table-action" data-pick="${esc(t)}">${esc(t)}</button>`).join(' ')}</p>`).join('');
   return `<section class="insight-block"><h4>Danh mục mẫu (top ${st.size}, tái cân bằng hàng tháng)</h4>
     <div id="qStrategyChart" class="q-chart"></div>
-    <div class="portfolio-table-wrap"><table class="portfolio-table"><thead><tr><th>Danh mục</th><th>Lợi nhuận/năm</th><th>Tổng</th><th>Biến động/năm</th><th>Sharpe</th><th>Sụt giảm lớn nhất</th><th>Tháng thắng VN-Index</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="portfolio-table-wrap"><table class="portfolio-table"><thead><tr><th>Danh mục</th><th>Lợi nhuận/năm (giá)</th><th>Có cổ tức ước tính</th><th>Tổng (giá)</th><th>Biến động/năm</th><th>Sharpe</th><th>Sụt giảm lớn nhất</th><th>Tháng thắng VN-Index</th></tr></thead><tbody>${rows}</tbody></table></div>
     ${picks}
     <p class="tcbs-flag medium">${esc(st.note)} Kết quả quá khứ trên dữ liệu có thiên lệch sống sót thường đẹp hơn thực tế đáng kể — đây là cơ sở để nghiên cứu tiếp, không phải cam kết lợi nhuận.</p></section>`;
 }

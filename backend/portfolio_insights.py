@@ -372,11 +372,16 @@ def fetch_insight_data(tickers: List[str]) -> Tuple[List[Tuple[str, float]], Dic
     index_closes = [(b.get("tradingDate", ""), float(b["close"])) for b in bars if b.get("close")]
     from concurrent.futures import ThreadPoolExecutor
 
+    from company_cache import cached_profiles
+    profiles = cached_profiles(tickers)     # database first; Vietcap only for what it lacks
+
     def one(t: str) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
-        try:
-            info = _vci.company_info(t) or {}
-        except Exception:
-            info = {}
+        info = profiles.get(t)
+        if info is None:
+            try:
+                info = _vci.company_info(t) or {}
+            except Exception:
+                info = {}
         try:
             items = _vci.company_news(t, days=120, size=20)
         except Exception:

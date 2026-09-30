@@ -62,6 +62,10 @@ def companies_for(tickers: List[str]) -> Dict[str, Dict[str, Any]]:
         sys.path.append(api_dir)  # append: api/agents.py must not shadow the backend agents package
     import _vci
     from concurrent.futures import ThreadPoolExecutor
+    from company_cache import cached_profiles
+
+    out = cached_profiles(tickers)          # local database first: instant
+    missing = [t for t in tickers if t not in out]
 
     def one(t: str) -> Dict[str, Any]:
         try:
@@ -69,9 +73,11 @@ def companies_for(tickers: List[str]) -> Dict[str, Dict[str, Any]]:
         except Exception:
             return {}
 
-    # Vietcap's profile endpoint takes seconds per call; fetch in parallel.
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        return dict(zip(tickers, pool.map(one, tickers)))
+    # Vietcap's profile endpoint takes seconds per call; fetch what the database lacks in parallel.
+    if missing:
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            out.update(dict(zip(missing, pool.map(one, missing))))
+    return {t: out.get(t, {}) for t in tickers}
 
 
 def insights(analysis: Dict[str, Any]) -> Dict[str, Any]:

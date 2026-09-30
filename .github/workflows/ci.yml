@@ -28,8 +28,27 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install numpy requests
-      # Offline unit tests only: no TCBS credentials, no network calls.
+          cache: pip
+          cache-dependency-path: docker/backend-requirements.txt
+      # Same dependency set as the Docker image, plus what the tests need (httpx for TestClient, ruff).
+      - run: pip install -r docker/backend-requirements.txt httpx ruff
+      # Undefined names, unused imports/variables: catches what splitting or refactoring files can break.
+      - run: ruff check --select F backend api
+      # Offline tests only: no TCBS credentials, no network calls.
       - run: npm run test:py
         env:
           PYTHON: python
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Local stack builds
+        run: docker compose build
+      - name: VPS overlay is valid (dummy secrets)
+        run: docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile autosync config --quiet
+        env:
+          DOMAIN: trader.example.com
+          APP_PASSWORD: ci
+          AUTH_SECRET: cccccccccccccccccccccccccccccccccccccccc
+          POSTGRES_PASSWORD: ci

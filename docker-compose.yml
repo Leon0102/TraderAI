@@ -68,6 +68,30 @@ services:
       disable: true
     profiles: [autosync]
 
+  # Daily Postgres dump into ./backups (14 newest kept), first one right at start.
+  backup:
+    image: postgres:16-alpine
+    profiles: [autosync]
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:-traderai}
+      TZ: Asia/Ho_Chi_Minh
+    volumes:
+      - ./backups:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [traderai]
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          f=/backups/traderai-$$(date +%Y%m%d-%H%M).sql.gz
+          if pg_dump -h db -U traderai --clean --if-exists traderai | gzip > "$$f"; then chmod 600 "$$f"; echo "saved $$f"; else rm -f "$$f"; echo "backup failed"; fi
+          ls -t /backups/traderai-*.sql.gz 2>/dev/null | tail -n +15 | xargs -r rm --
+          sleep 86400
+        done
+
   frontend:
     build:
       context: .

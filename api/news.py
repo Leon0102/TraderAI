@@ -4,7 +4,6 @@ Fetches news from TCBS API + RSS feeds (CafeF, VnExpress) with Vietnamese sentim
 from http.server import BaseHTTPRequestHandler
 import json
 import warnings
-import time
 import hashlib
 warnings.filterwarnings('ignore')
 

@@ -88,6 +88,46 @@ def test_nav_record_roundtrip():
             pass
 
 
+def test_cash_ledger_flows_replace_estimates():
+    led = {"covered_from": "2026-09-01", "covered_to": "2026-09-05", "entries": {
+        "a": {"d": "2026-09-03", "code": "1141", "name": "Nhận báo có từ ngân hàng", "credit": 50e6, "debit": 0},
+        "b": {"d": "2026-09-04", "code": "1162", "name": "Lãi tiền gửi", "credit": 20_000, "debit": 0},
+        "c": {"d": "2026-09-04", "code": "1182", "name": "Phí lưu ký tháng", "credit": 0, "debit": 35_000},
+        "d": {"d": "2026-09-05", "code": "1202", "name": "Giao dịch giảm tiền", "credit": 0, "debit": 1_000},
+        "e": {"d": "2026-09-04", "code": "9999", "name": "Chuyển tiền ra ngân hàng", "credit": 0, "debit": 10e6}}}
+    flows = ta.ledger_flows(led)
+    assert flows == {"2026-09-03": 50e6, "2026-09-04": -10e6}, "interest, fees and adjustments are not external flows"
+    sm = ta.ledger_summary(led)
+    assert sm["deposits"] == 50_000_000 and sm["withdrawals"] == 10_000_000 and sm["custody_fees"] == 35_000 and sm["interest"] == 20_000
+    h = {"days": {
+        "2026-09-02": {"nav": 100e6, "positions": {"AAA": [1000, 50_000]}},
+        "2026-09-03": {"nav": 155e6, "positions": {"AAA": [1000, 55_000]}},
+        "2026-09-05": {"nav": 148e6, "positions": {"AAA": [1000, 55_000]}}}, "flows": {}}
+    m = nh.metrics(h, [], flows, "2026-09-01", "2026-09-05")
+    p = m["points"]
+    assert p[1]["flow"] == 50_000_000 and p[1]["flow_source"] == "ledger" and not p[1]["flow_estimated"]
+    assert p[2]["flow"] == -10_000_000, "flows on days between snapshots (09-04) are included"
+    # outside the ledger's coverage the NAV-residual estimate is used again
+    m2 = nh.metrics(h, [], flows, "2026-09-03", "2026-09-05")
+    assert m2["points"][1]["flow_source"] != "ledger"
+    h["flows"]["2026-09-03"] = 0.0
+    assert nh.metrics(h, [], flows, "2026-09-01", "2026-09-05")["points"][1]["flow_source"] == "manual"
+
+
+def test_attribution_adds_up():
+    h = {"days": {
+        "2026-09-01": {"nav": 200e6, "positions": {"AAA": [1000, 50_000], "BBB": [2000, 20_000]}},
+        "2026-09-02": {"nav": 213e6, "positions": {"AAA": [1000, 52_000], "BBB": [2000, 21_000]}},          # +2m +2m, +9m other
+        "2026-09-03": {"nav": 213e6, "positions": {"AAA": [1000, 51_000]}}}, "flows": {}}                   # BBB sold today
+    pts = [{"date": "2026-09-02", "flow": 0}, {"date": "2026-09-03", "flow": 0}]
+    a = nh.attribution(h, {"AAA": "Công nghệ", "BBB": "Thép"}, lambda t, d: 22_000 if t == "BBB" else None, pts)
+    rows = {r["ticker"]: r["pnl"] for r in a["by_ticker"]}
+    assert rows == {"AAA": 2_000_000 - 1_000_000, "BBB": 2_000_000 + 2_000_000}, rows   # day 1: +2000*1000; day 2: sold at 22,000
+    assert a["price_pnl"] == 5_000_000 and a["nav_change_ex_flows"] == 13_000_000 and a["other"] == 8_000_000
+    assert a["by_sector"][0]["sector"] == "Thép" and a["by_ticker"][0]["ticker"] == "BBB"
+    assert nh.attribution({"days": {}, "flows": {}}, {})["by_ticker"] == []
+
+
 def test_personal_rules():
     a = ta.analyze_snapshot(SNAPSHOT)
     a["today_trades"] = [{"ticker": "HPG", "buy_qty": 100}]
@@ -122,6 +162,21 @@ def test_pretrade_checks():
     assert pretrade.run_checks(a, rules, "VNM", 60_000, 61_000, None, None, {}, {}, closes, None, None, [])["verdict"] == "KHÔNG ĐẠT"
 
 
+def test_pretrade_liquidity_caps_size_and_flags_big_orders():
+    a = ta.analyze_snapshot(SNAPSHOT)
+    rules = dict(pr.DEFAULT_RULES)
+    closes = {"VNM": _series(60_000, 0.001)}
+    thin = pretrade.run_checks(a, rules, "VNM", 60_000, 56_000, 70_000, None, {}, {}, closes, None, None, [], adv_value=200_000_000)
+    assert thin["sizing"]["limited_by"] == "thanh khoản" and thin["sizing"]["chosen_shares"] == 100, thin["sizing"]  # 5% of 200m = 10m = 166 -> 100
+    assert {c["name"]: c["status"] for c in thin["checks"]}["Mã kém thanh khoản"] == "WARN"
+    big = pretrade.run_checks(a, rules, "VNM", 60_000, 56_000, 70_000, 4_000, {}, {}, closes, None, None, [], adv_value=1_000_000_000)
+    assert {c["name"]: c["status"] for c in big["checks"]}["Thanh khoản"] == "FAIL", "240m order = 24% of a 1 tỷ day"
+    liquid = pretrade.run_checks(a, rules, "VNM", 60_000, 56_000, 70_000, None, {}, {}, closes, None, None, [], adv_value=500_000_000_000)
+    assert {c["name"]: c["status"] for c in liquid["checks"]}["Thanh khoản"] == "PASS"
+    none = pretrade.run_checks(a, rules, "VNM", 60_000, 56_000, 70_000, None, {}, {}, closes, None, None, [])
+    assert {c["name"]: c["status"] for c in none["checks"]}["Thanh khoản"] == "WARN"
+
+
 def test_trade_plan_tags_the_next_buy():
     with tempfile.TemporaryDirectory() as d:
         pi.JOURNAL_FILE = os.path.join(d, "j.json")
@@ -151,6 +206,51 @@ def test_behaviour_flags():
     assert b["winner_hold_days"] == 5.0 and b["loser_hold_days"] == 64.0
     assert b["revenge_tickers"] == ["BBB"]
     assert any("gồng lỗ" in n for n in b["notes"]) and any("trả thù" in n for n in b["notes"])
+
+
+def test_council_log_scoring():
+    import council_log as cl
+    with tempfile.TemporaryDirectory() as d:
+        cl.LOG_FILE = os.path.join(d, "c.json")
+        cl.log_verdict("AAA", {"action": "MUA", "sizing": "15%"}, 100.0, "gemini", date(2026, 8, 1))
+        cl.log_verdict("AAA", {"action": "BÁN", "sizing": "0%"}, 100.0, "heuristic", date(2026, 8, 1))   # same day: latest wins
+        cl.log_verdict("BBB", {"action": "MUA", "sizing": "10%"}, 50.0, None, date(2026, 8, 2))
+        cl.log_verdict("CCC", {"action": "MUA", "sizing": "10%"}, 10.0, None, date(2026, 9, 25))        # not due yet
+        log = cl.load()
+        assert len(log) == 3 and log["2026-08-01:AAA"]["action"] == "BÁN"
+        panel = {"AAA": [("2026-08-01", 100.0, 1), ("2026-08-29", 90.0, 1)], "BBB": [("2026-08-02", 50.0, 1), ("2026-08-30", 60.0, 1)],
+                 "VNINDEX": [("2026-08-01", 1000.0, 1), ("2026-08-02", 1000.0, 1), ("2026-08-29", 1020.0, 1), ("2026-08-30", 1020.0, 1)]}
+        sc_ = cl.score(log, panel, today=date(2026, 9, 30))
+        assert sc_["scored"] == 2 and sc_["pending"] == 1
+        assert sc_["by_action"]["BÁN"]["right_pct"] == 100.0, "sell call: stock lagged the index (-10% vs +2%)"
+        assert sc_["by_action"]["MUA"]["right_pct"] == 100.0 and sc_["by_action"]["MUA"]["avg_excess_pct"] == 18.0
+        assert "Chưa đủ mẫu" in sc_["verdict"], "two verdicts prove nothing"
+
+
+def test_telegram_bot_answers_only_the_owner_and_hides_money():
+    import telegram_bot as tb
+    with tempfile.TemporaryDirectory() as d:
+        ta.SNAPSHOT_FILE, tb.OFFSET_FILE, nh.HISTORY_FILE = os.path.join(d, "s.json"), os.path.join(d, "o.json"), os.path.join(d, "h.json")
+        assert "Chưa có dữ liệu" in tb.handle("/nav")
+        ta._write_private(ta.SNAPSHOT_FILE, SNAPSHOT)
+        holdings = tb.handle("/holdings")
+        assert "FPT" in holdings and "%" in holdings and "0001234567" not in holdings and "180.000.000" not in holdings
+        assert "Danh mục" in tb.handle("/rules@my_bot") or "•" in tb.handle("/rules")
+        assert "Lệnh:" in tb.handle("/help") and "Không hiểu" in tb.handle("/sell FPT")
+        sent = []
+        updates = {"result": [{"update_id": 7, "message": {"chat": {"id": 42}, "text": "/holdings"}},
+                              {"update_id": 8, "message": {"chat": {"id": 999}, "text": "/holdings"}}]}
+        def api(method, params, timeout=35):
+            sent.append((method, params))
+            return updates if method == "getUpdates" else {"ok": True}
+        os.environ["TELEGRAM_CHAT_ID"] = "42"
+        try:
+            assert tb.poll_once(api) == 1
+        finally:
+            del os.environ["TELEGRAM_CHAT_ID"]
+        replies = [p for m, p in sent if m == "sendMessage"]
+        assert len(replies) == 1 and replies[0]["chat_id"] == "42", "the stranger in chat 999 gets no reply"
+        assert (ta._read_json(tb.OFFSET_FILE) or {}).get("offset") == 9, "offset advances past every update"
 
 
 def test_forecast_scoring():
@@ -231,11 +331,11 @@ def test_alert_dedupe_and_contents():
 
 def test_host_and_origin_guard():
     import ipaddress
-    import server
+    import guards
     from types import SimpleNamespace
-    server._TRUSTED_NETS = [ipaddress.ip_network("172.30.57.0/24")]  # what docker-compose sets
-    assert all(server._host_allowed(h) for h in ("localhost", "127.0.0.1", "::1", "frontend.traderai.orb.local", "app.localhost", "LOCALHOST."))
-    assert not any(server._host_allowed(h) for h in ("evil.example", "orb.local.evil.com", "notorb.local", "", None, "192.168.1.5"))
+    guards._TRUSTED_NETS = [ipaddress.ip_network("172.30.57.0/24")]  # what docker-compose sets
+    assert all(guards._host_allowed(h) for h in ("localhost", "127.0.0.1", "::1", "frontend.traderai.orb.local", "app.localhost", "LOCALHOST."))
+    assert not any(guards._host_allowed(h) for h in ("evil.example", "orb.local.evil.com", "notorb.local", "", None, "192.168.1.5"))
 
     def req(client, host, origin=None):
         headers = {"host": host}
@@ -245,7 +345,7 @@ def test_host_and_origin_guard():
 
     def blocked(r):
         try:
-            server._require_local(r)
+            guards._require_local(r)
             return False
         except Exception:
             return True

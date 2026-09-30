@@ -12,7 +12,7 @@ import hmac
 import html
 import os
 import time
-from typing import Optional
+from typing import Dict, List, Optional
 
 SESSION_COOKIE = "traderai_session"
 SESSION_DAYS = 30
@@ -63,6 +63,49 @@ def password_ok(candidate: str) -> bool:
     return bool(candidate) and hmac.compare_digest(_sign(secret, f"pw:{candidate}"), _sign(secret, f"pw:{password}"))
 
 
+# ---------- brute-force limiter ----------
+
+MAX_FAILURES = 5            # per client
+MAX_FAILURES_TOTAL = 30     # across all clients (a botnet sharing the guessing)
+WINDOW_SECONDS = 15 * 60
+_failures: Dict[str, List[float]] = {}
+
+
+def client_key(forwarded_for: Optional[str], peer: str) -> str:
+    """The real client: the LAST X-Forwarded-For entry (appended by our own reverse proxy, so the
+    client cannot forge it); the socket peer when there is no proxy in front."""
+    if forwarded_for:
+        last = forwarded_for.split(",")[-1].strip()
+        if last:
+            return last
+    return peer or "unknown"
+
+
+def _recent(key: str, now: float) -> List[float]:
+    hits = [t for t in _failures.get(key, []) if now - t < WINDOW_SECONDS]
+    _failures[key] = hits
+    return hits
+
+
+def retry_after(key: str, now: Optional[float] = None) -> int:
+    """Seconds to wait before another attempt, 0 when allowed."""
+    now = now or time.time()
+    own = _recent(key, now)
+    total = [t for k in list(_failures) for t in _recent(k, now)]
+    for hits, limit in ((own, MAX_FAILURES), (total, MAX_FAILURES_TOTAL)):
+        if len(hits) >= limit:
+            return int(WINDOW_SECONDS - (now - min(hits))) + 1
+    return 0
+
+
+def record_failure(key: str, now: Optional[float] = None) -> None:
+    _failures.setdefault(key, []).append(now or time.time())
+
+
+def clear_failures(key: str) -> None:
+    _failures.pop(key, None)
+
+
 def is_open_path(path: str) -> bool:
     return any(path.startswith(p) for p in OPEN_PATHS)
 
@@ -76,7 +119,7 @@ def cookie_header(value: str, max_age: int) -> str:
     return f"{SESSION_COOKIE}={value}; Path=/; HttpOnly{secure}; SameSite=Lax; Max-Age={max_age}"
 
 
-def login_page(next_path: str, error: Optional[str] = None) -> str:
+def login_page(next_path: str, error: Optional[str] = None) -> str:  # noqa: E302
     err = f'<div class="error" role="alert">{html.escape(error)}</div>' if error else ""
     return f"""<!doctype html>
 <html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">

@@ -85,6 +85,9 @@ def daemon() -> None:
     import time as _time
 
     last_run = None
+    import telegram_bot
+    if telegram_bot.start_in_background():
+        print("telegram bot: listening for /nav /holdings /rules", flush=True)
     print(f"autosync daemon: sync {', '.join(f'{h:02d}:{m:02d}' for h, m in TIMES)}, market ingest {INGEST_TIME[0]:02d}:{INGEST_TIME[1]:02d}, Mon–Fri", flush=True)
     while True:
         now = datetime.now()

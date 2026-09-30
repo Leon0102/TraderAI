@@ -6,8 +6,9 @@ type Holding = { ticker: string; market_value: number; weight_pct: number };
 type Margin = { account: string; rtt_pct: number; debt: number; due: number; overdue: number; status: string | null; maintenance_pct: number | null; liquidation_pct: number | null; drop_to_call_pct?: number; drop_to_liquidation_pct?: number };
 type CashEvent = { date: string | null; ticker: string | null; kind: string; amount: number | null; quantity: number | null };
 export type OverviewAnalysis = { synced_at: string; summary: { nav: number; cash: number; debt?: number }; holdings: Holding[]; margin?: Margin[]; cash_calendar?: CashEvent[] };
-type NavPoint = { date: string; nav: number; flow: number; flow_estimated: boolean; twr_pct: number; drawdown_pct: number; vnindex_pct: number | null };
-type Nav = { points: NavPoint[]; stats: null | { since: string; days_tracked: number; calendar_days: number; twr_pct: number; vnindex_pct: number | null; excess_pct: number | null; twr_annual_pct: number | null; max_drawdown_pct: number; current_drawdown_pct: number; net_flows: number; nav_now: number } };
+type NavPoint = { date: string; nav: number; flow: number; flow_estimated: boolean; flow_source?: string; twr_pct: number; drawdown_pct: number; vnindex_pct: number | null };
+type Ledger = { from: string | null; to: string | null; deposits: number; withdrawals: number; custody_fees: number; interest: number; other_adjustments: number; entries: number };
+type Nav = { cash_ledger?: Ledger | null; points: NavPoint[]; stats: null | { since: string; days_tracked: number; calendar_days: number; twr_pct: number; vnindex_pct: number | null; excess_pct: number | null; twr_annual_pct: number | null; max_drawdown_pct: number; current_drawdown_pct: number; net_flows: number; nav_now: number } };
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T | null;
 const esc = (value: string) => value.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char] || char));
@@ -130,13 +131,34 @@ async function loadNav() {
         <div><span>Nạp/rút ròng (ước tính)</span><strong>${vnd(s.net_flows)} đ</strong><small>${s.days_tracked} ngày có dữ liệu</small></div>
       </div>
       <div id="accNavChart" class="nav-chart"></div>
-      ${flows.length ? `<details class="flow-edit"><summary>Nạp/rút đã nhận diện (${flows.length}) — sửa nếu sai</summary><table class="portfolio-table"><tbody>${flows.map(f => `<tr><td>${esc(f.date)}</td><td>${vnd(f.flow)} đ${f.flow_estimated ? ' <small>(tự nhận diện)</small>' : ''}</td><td><button class="table-action" data-flow-zero="${esc(f.date)}">Không phải nạp/rút</button></td></tr>`).join('')}</tbody></table></details>` : ''}
-      <p class="form-hint">TWR loại bỏ ảnh hưởng của tiền nạp/rút, nên so được trực tiếp với VN-Index. Nạp/rút được ước tính từ phần thay đổi NAV mà giá cổ phiếu không giải thích được.</p>`;
+      ${flows.length ? `<details class="flow-edit"><summary>Nạp/rút đã nhận diện (${flows.length}) — sửa nếu sai</summary><table class="portfolio-table"><tbody>${flows.map(f => `<tr><td>${esc(f.date)}</td><td>${vnd(f.flow)} đ <small>(${f.flow_source === 'ledger' ? 'sao kê TCBS' : f.flow_source === 'manual' ? 'bạn nhập' : 'ước tính'})</small></td><td><button class="table-action" data-flow-zero="${esc(f.date)}">Không phải nạp/rút</button></td></tr>`).join('')}</tbody></table></details>` : ''}
+      ${nav.cash_ledger ? `<p class="form-hint">Sao kê tiền TCBS (${esc(nav.cash_ledger.from || '')} → ${esc(nav.cash_ledger.to || '')}): nạp ${vnd(nav.cash_ledger.deposits)} đ · rút ${vnd(nav.cash_ledger.withdrawals)} đ · phí lưu ký ${vnd(nav.cash_ledger.custody_fees)} đ · lãi tiền gửi ${vnd(nav.cash_ledger.interest)} đ.</p>` : ''}
+      <p class="form-hint">TWR loại bỏ ảnh hưởng của tiền nạp/rút, nên so được trực tiếp với VN-Index. Nạp/rút lấy từ <b>sao kê tiền TCBS</b> (chính xác); trước ngày sao kê hoặc khi thiếu, app ước tính từ phần NAV mà giá cổ phiếu không giải thích được.</p>`;
     drawNavChart($('accNavChart')!, nav.points);
     box.querySelectorAll<HTMLElement>('[data-flow-zero]').forEach(b => b.addEventListener('click', () => saveFlow(b.dataset.flowZero!, 0)));
   } catch {
     box.innerHTML = '<p class="form-hint negative">Không tải được lịch sử NAV.</p>';
   }
+}
+
+type Attribution = { since: string | null; days: number; by_ticker: Array<{ ticker: string; pnl: number; sector: string }>; by_sector: Array<{ sector: string; pnl: number }>; price_pnl: number; nav_change_ex_flows: number; other: number; other_note?: string };
+
+async function loadAttribution() {
+  const box = $('accAttribution');
+  if (!box) return;
+  try {
+    const a = (await (await fetch('/api/account/attribution')).json()) as Attribution;
+    if (!a.by_ticker?.length) { box.innerHTML = '<div class="acc-card"><strong>Nguồn lãi/lỗ</strong><p class="form-hint">Cần ít nhất 2 ngày lịch sử NAV — đồng bộ mỗi ngày để so sánh.</p></div>'; return; }
+    const max = Math.max(...a.by_ticker.map(r => Math.abs(r.pnl)), 1);
+    const bar = (v: number) => `<span class="attr-bar ${v >= 0 ? 'up' : 'down'}" style="width:${Math.max(2, Math.abs(v) / max * 100)}%"></span>`;
+    box.innerHTML = `<div class="acc-card attr-card"><strong>Nguồn lãi/lỗ từ ${esc(a.since || '')} (${a.days} ngày)</strong>
+      <div class="attr-rows">${a.by_ticker.map(r => `<div class="attr-row"><span><b>${esc(r.ticker)}</b> <small>${esc(r.sector)}</small></span>${bar(r.pnl)}<b class="${r.pnl >= 0 ? 'positive' : 'negative'}">${r.pnl >= 0 ? '+' : ''}${vnd(r.pnl)}</b></div>`).join('')}</div>
+      <div class="attr-sectors">${a.by_sector.map(s => `<span class="plan-action ${s.pnl >= 0 ? 'info' : 'high'}">${esc(s.sector)} ${s.pnl >= 0 ? '+' : ''}${vnd(s.pnl / 1e6)}tr</span>`).join('')}</div>
+      <dl class="acc-dl"><div><dt>Do giá cổ phiếu biến động</dt><dd>${a.price_pnl >= 0 ? '+' : ''}${vnd(a.price_pnl)} đ</dd></div>
+      <div><dt>Khác (cổ tức, phí, lãi, giao dịch trong ngày)</dt><dd>${a.other >= 0 ? '+' : ''}${vnd(a.other)} đ</dd></div>
+      <div><dt>Thay đổi NAV (đã loại nạp/rút)</dt><dd>${a.nav_change_ex_flows >= 0 ? '+' : ''}${vnd(a.nav_change_ex_flows)} đ</dd></div></dl>
+      <p class="form-hint">Tính theo vị thế cuối ngày trước × biến động giá hôm sau; phần còn lại gộp vào "Khác" nên tổng luôn khớp với thay đổi NAV thật.</p></div>`;
+  } catch { box.innerHTML = ''; }
 }
 
 async function loadRulesAndRegime() {
@@ -171,9 +193,11 @@ export function loadOverview(a: OverviewAnalysis) {
       <div class="acc-card"><strong>Phân bổ tài sản</strong>${donut(a.holdings, a.summary.cash, a.summary.nav)}</div>
       <div id="accRegime"><div class="acc-card"><strong>Trạng thái thị trường</strong><p class="form-hint">Đang tính…</p></div></div>
       <div id="accRules"></div>
+      <div id="accAttribution"></div>
       ${marginCard(a.margin || [])}
       ${cashCalendar(a.cash_calendar || [])}
     </div>`;
   loadNav();
+  loadAttribution();
   loadRulesAndRegime();
 }

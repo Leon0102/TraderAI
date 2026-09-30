@@ -61,7 +61,11 @@ def _index_on(index: Dict[str, float], day: str) -> Optional[float]:
     return index[max(keys)] if keys else None
 
 
-def metrics(history: Dict[str, Any], index_closes: List[Tuple[str, float]]) -> Dict[str, Any]:
+def metrics(history: Dict[str, Any], index_closes: List[Tuple[str, float]],
+            ledger_flows: Optional[Dict[str, float]] = None, ledger_from: Optional[str] = None,
+            ledger_to: Optional[str] = None) -> Dict[str, Any]:
+    """`ledger_flows` = exact flows from the TCBS cash statement, trusted between ledger_from and
+    ledger_to; manual overrides win; otherwise flows are estimated from the NAV residual."""
     days = sorted(history["days"])
     idx = dict(index_closes)
     if not days:
@@ -71,11 +75,15 @@ def metrics(history: Dict[str, Any], index_closes: List[Tuple[str, float]]) -> D
     base_index = _index_on(idx, days[0])
     for i, d in enumerate(days):
         cur = history["days"][d]
-        flow, estimated = 0.0, False
+        flow, estimated, source = 0.0, False, "none"
         if i:
             prev = history["days"][days[i - 1]]
+            prev_day = days[i - 1]
             if d in history["flows"]:
                 flow = history["flows"][d]
+            elif ledger_flows is not None and ledger_from and ledger_to and ledger_from <= prev_day and d <= ledger_to:
+                # every calendar day since the previous snapshot (weekends, holidays included)
+                flow, source = sum(v for k, v in ledger_flows.items() if prev_day < k <= d), "ledger"
             else:
                 flow, estimated = estimate_flow(prev, cur), True
             if prev["nav"] > 0:
@@ -86,6 +94,7 @@ def metrics(history: Dict[str, Any], index_closes: List[Tuple[str, float]]) -> D
         max_dd = min(max_dd, dd)
         iv = _index_on(idx, d)
         points.append({"date": d, "nav": round(cur["nav"]), "flow": round(flow), "flow_estimated": estimated and flow != 0,
+                       "flow_source": "manual" if (i and d in history["flows"]) else source if flow else "none",
                        "twr_pct": round((twr - 1) * 100, 2), "drawdown_pct": round(dd * 100, 2),
                        "vnindex_pct": round((iv / base_index - 1) * 100, 2) if iv and base_index else None})
     last = points[-1]
@@ -102,3 +111,37 @@ def metrics(history: Dict[str, Any], index_closes: List[Tuple[str, float]]) -> D
             "net_flows": round(total_flows), "nav_now": last["nav"],
         },
     }
+
+
+def attribution(history: Dict[str, Any], sectors: Dict[str, str], price_lookup=None,
+                points: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    """Where the P&L came from between snapshots: yesterday's holdings × today's price move, per
+    ticker and per sector. Whatever the NAV change holds beyond that (dividends, fees, trades
+    during the day, interest) is reported as "other", so the parts add up to the real change.
+
+    `price_lookup(ticker, day)` supplies a price for positions closed since the previous snapshot."""
+    days = sorted(history["days"])
+    by_ticker: Dict[str, float] = {}
+    by_sector: Dict[str, float] = {}
+    flows = {p["date"]: p["flow"] for p in (points or [])}
+    total_price = total_nav_change = 0.0
+    for prev_d, d in zip(days, days[1:]):
+        prev, cur = history["days"][prev_d], history["days"][d]
+        for t, (qty, p_prev) in prev["positions"].items():
+            p_now = (cur["positions"].get(t) or [0, None])[1]
+            if p_now is None and price_lookup:
+                p_now = price_lookup(t, d)
+            if not p_now or not p_prev:
+                continue
+            pnl = qty * (p_now - p_prev)
+            by_ticker[t] = by_ticker.get(t, 0.0) + pnl
+            sec = sectors.get(t) or "Khác"
+            by_sector[sec] = by_sector.get(sec, 0.0) + pnl
+            total_price += pnl
+        total_nav_change += cur["nav"] - prev["nav"] - flows.get(d, 0.0)
+    rows = sorted(({"ticker": t, "pnl": round(v), "sector": sectors.get(t) or "Khác"} for t, v in by_ticker.items()), key=lambda r: r["pnl"])
+    return {"since": days[0] if days else None, "days": len(days),
+            "by_ticker": rows[::-1], "by_sector": sorted(({"sector": k, "pnl": round(v)} for k, v in by_sector.items()), key=lambda r: -r["pnl"]),
+            "price_pnl": round(total_price), "nav_change_ex_flows": round(total_nav_change),
+            "other": round(total_nav_change - total_price),
+            "other_note": "Cổ tức, phí/thuế, lãi tiền gửi, và lãi/lỗ của các lệnh mua bán trong ngày."}
