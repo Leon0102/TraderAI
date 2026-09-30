@@ -122,7 +122,7 @@ async function refreshStatus(): Promise<Status | null> {
     }
     showControls(st.logged_in);
     const synced = st.last_sync ? ` · đồng bộ lần cuối ${time(st.last_sync)}` : '';
-    setStatus(st.logged_in ? `Đã đăng nhập, token dùng đến ${time(st.token_expires_at)}${synced}` : `Nhập OTP từ app TCBS để đăng nhập (tối đa 10 lần/ngày)${synced}`);
+    setStatus(st.logged_in ? `Đã đăng nhập, token dùng đến ${time(st.token_expires_at)}${synced}` : `Nhập iOTP từ TCInvest (Cài đặt → Bảo mật → iOTP → Nhận mã iOTP), tối đa 10 lần/ngày${synced}`);
     return st;
   } catch {
     $('tcbsPanel')?.classList.add('tcbs-offline');

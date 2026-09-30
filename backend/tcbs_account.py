@@ -106,7 +106,15 @@ def login(otp: str) -> Dict[str, Any]:
     except requests.RequestException as e:
         raise TcbsError(f"Không kết nối được TCBS: {e.__class__.__name__}")
     if resp.status_code != 200:
-        raise TcbsError(f"TCBS từ chối đăng nhập (HTTP {resp.status_code}): {_error_text(resp)}")
+        hint = ""
+        if resp.status_code >= 500:
+            # A bad key gets 400 "User not found"; a 5xx means the key matched an account and TCBS
+            # failed later — in practice an expired/wrong iOTP or a key not enabled for Open API.
+            hint = (" — Key đã được TCBS nhận ra; lỗi thường do mã iOTP hết hạn/sai (lấy mã mới và nhập ngay trong vài giây) "
+                    "hoặc key chưa được kích hoạt Open API (kiểm tra/tạo lại key trong TCInvest). Mỗi lần thử tính vào giới hạn 10 lần/ngày.")
+        elif "User not found" in _error_text(resp):
+            hint = " — TCBS không nhận ra API key: kiểm tra lại key.txt hoặc tạo key mới trong TCInvest."
+        raise TcbsError(f"TCBS từ chối đăng nhập (HTTP {resp.status_code}): {_error_text(resp)}{hint}")
     token = (resp.json() or {}).get("token")
     if not token:
         raise TcbsError("TCBS không trả về token.")
