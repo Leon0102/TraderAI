@@ -23,6 +23,8 @@ import time
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
+import storage
+
 BASE_URL = "https://openapi.tcbs.com.vn"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RUNTIME_DIR = os.path.join(ROOT, "runtime")
@@ -66,18 +68,12 @@ def _jwt_claims(token: str) -> Dict[str, Any]:
 
 
 def _write_private(path: str, data: Any) -> None:
-    os.makedirs(RUNTIME_DIR, exist_ok=True)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    """Persist a document: Postgres when DATABASE_URL is set, else a 0600 JSON file."""
+    storage.write(path, data)
 
 
 def _read_json(path: str) -> Optional[Dict[str, Any]]:
-    try:
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return None
+    return storage.read(path)
 
 
 def load_token() -> Optional[Dict[str, Any]]:
@@ -91,10 +87,7 @@ def load_token() -> Optional[Dict[str, Any]]:
 
 
 def clear_token() -> None:
-    try:
-        os.remove(TOKEN_FILE)
-    except OSError:
-        pass
+    storage.delete(TOKEN_FILE)
 
 
 def login(otp: str) -> Dict[str, Any]:

@@ -1,0 +1,13 @@
+# backend/requirements.txt minus vnstock (pinned version no longer on PyPI; only /api/listing
+# uses it, lazily, and degrades gracefully) and ipython (dev only), plus numpy and psycopg.
+fastapi==0.128.8
+uvicorn[standard]==0.39.0
+requests
+beautifulsoup4
+lxml
+pandas
+packaging
+google-genai
+openai
+numpy
+psycopg[binary]>=3.2

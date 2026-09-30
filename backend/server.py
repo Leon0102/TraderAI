@@ -187,11 +187,13 @@ def api_agents_stream(req: AgentAnalyzeRequest):
 # ==========================================
 # TCBS account (read-only, local machine only)
 # ==========================================
+import ipaddress  # noqa: E402
 from urllib.parse import urlparse  # noqa: E402
 
 from fastapi import Request  # noqa: E402
 
 import tcbs_account  # noqa: E402
+import storage as storage_mod  # noqa: E402
 import portfolio_plan  # noqa: E402
 import portfolio_insights  # noqa: E402
 import forecast  # noqa: E402
@@ -208,6 +210,19 @@ from agents.llm import call_llm, normalize_provider, resolve_api_key, LLMError  
 from agents.prompts import PORTFOLIO_REVIEW_PROMPT, GROUNDING_RULES  # noqa: E402
 
 _LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost"}
+# Docker: requests reach the backend from the nginx container, not 127.0.0.1. docker-compose sets
+# ACCOUNT_TRUSTED_NETWORKS to its private bridge network and publishes ports on 127.0.0.1 only.
+_TRUSTED_NETS = [ipaddress.ip_network(n.strip()) for n in os.environ.get("ACCOUNT_TRUSTED_NETWORKS", "").split(",") if n.strip()]
+
+
+def _is_trusted_client(host: str) -> bool:
+    if host in _LOCAL_HOSTS:
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return any(ip in net for net in _TRUSTED_NETS)
 
 
 def _require_local(request: Request) -> None:
@@ -215,7 +230,7 @@ def _require_local(request: Request) -> None:
     so reject callers from other machines and pages served from other sites."""
     client = request.client.host if request.client else ""
     origin = request.headers.get("origin")
-    if client not in _LOCAL_HOSTS or (origin and urlparse(origin).hostname not in _LOCAL_HOSTS):
+    if not _is_trusted_client(client) or (origin and urlparse(origin).hostname not in _LOCAL_HOSTS):
         raise HTTPException(status_code=403, detail="Dữ liệu tài khoản TCBS chỉ truy cập được từ máy local.")
 
 
@@ -480,7 +495,7 @@ def api_account_autosync(request: Request):
     if os.path.isfile(autosync.LOG):
         with open(autosync.LOG, encoding="utf-8", errors="replace") as f:
             tail = f.read().splitlines()[-5:]
-    return {"installed": autosync.installed(), "times": [f"{h:02d}:{m:02d}" for h, m in autosync.TIMES],
+    return {"installed": autosync.installed(), "mode": autosync.mode(), "times": [f"{h:02d}:{m:02d}" for h, m in autosync.TIMES],
             "telegram_configured": bool(os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID")),
             "log": tail}
 
@@ -525,6 +540,9 @@ def api_account_review(req: PortfolioReviewRequest, request: Request):
                     "warning": f"LLM gặp lỗi, dùng chế độ Heuristic: {e}"}
     return {"content": tcbs_account.heuristic_review(analysis), "engine": "heuristic"}
 
+
+if storage_mod.using_database():
+    print(f"🗄️  Storage: Postgres (imported {storage_mod.import_files_once()} existing runtime documents)")
 
 if __name__ == "__main__":
     print("🚀 TraderAI Backend starting...")

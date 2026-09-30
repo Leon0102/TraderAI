@@ -6,6 +6,7 @@ weekly report on Fridays.
   /usr/bin/python3 backend/autosync.py run         # one pass (what launchd runs)
   /usr/bin/python3 backend/autosync.py install     # add the macOS LaunchAgent
   /usr/bin/python3 backend/autosync.py uninstall   # remove it
+  python backend/autosync.py daemon                # Docker scheduler loop
 """
 
 import os
@@ -59,7 +60,39 @@ def run() -> int:
     return 0
 
 
+def mode() -> str:
+    """"docker" when a scheduler container runs this job, "launchd" on macOS, else "manual"."""
+    if os.environ.get("AUTOSYNC_MODE") == "docker":
+        return "docker"
+    return "launchd" if sys.platform == "darwin" else "manual"
+
+
+def _heartbeat_path() -> str:
+    return os.path.join(ta.RUNTIME_DIR, "autosync_heartbeat.json")
+
+
+def daemon() -> None:
+    """Scheduler loop for Docker: run at TIMES on weekdays (container TZ), heartbeat every minute."""
+    import time as _time
+
+    last_run = None
+    print(f"autosync daemon: {', '.join(f'{h:02d}:{m:02d}' for h, m in TIMES)} Mon–Fri", flush=True)
+    while True:
+        now = datetime.now()
+        ta._write_private(_heartbeat_path(), {"at": now.isoformat(timespec="seconds")})
+        slot = (now.date(), now.hour, now.minute)
+        if now.weekday() < 5 and (now.hour, now.minute) in TIMES and slot != last_run:
+            last_run = slot
+            try:
+                run()
+            except Exception as e:  # keep the scheduler alive; the next slot retries
+                print(f"{now.isoformat(timespec='seconds')} run failed: {e!r}", flush=True)
+        _time.sleep(60 - datetime.now().second + 1)
+
+
 def install() -> None:
+    if mode() != "launchd":
+        raise RuntimeError("Trong Docker, bật tự đồng bộ bằng: docker compose --profile autosync up -d")
     os.makedirs(os.path.dirname(PLIST), exist_ok=True)
     os.makedirs(ta.RUNTIME_DIR, exist_ok=True)
     plist = {
@@ -78,6 +111,8 @@ def install() -> None:
 
 
 def uninstall() -> None:
+    if mode() == "docker":
+        raise RuntimeError("Trong Docker, tắt tự đồng bộ bằng: docker compose stop scheduler")
     if os.path.exists(PLIST):
         subprocess.run(["launchctl", "unload", PLIST], capture_output=True)
         os.remove(PLIST)
@@ -85,6 +120,12 @@ def uninstall() -> None:
 
 
 def installed() -> bool:
+    if mode() == "docker":
+        beat = ta._read_json(_heartbeat_path()) or {}
+        try:
+            return (datetime.now() - datetime.fromisoformat(beat["at"])).total_seconds() < 180
+        except (KeyError, ValueError):
+            return False
     return os.path.exists(PLIST)
 
 
@@ -94,5 +135,7 @@ if __name__ == "__main__":
         install()
     elif cmd == "uninstall":
         uninstall()
+    elif cmd == "daemon":
+        daemon()
     else:
         sys.exit(run())

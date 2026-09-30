@@ -1,0 +1,73 @@
+# Local stack: Postgres + FastAPI backend + nginx-served frontend (+ optional scheduler).
+#   docker compose up -d --build              -> http://localhost:8080
+#   docker compose --profile autosync up -d   -> also run the weekday auto-sync job
+# Every port is bound to 127.0.0.1 so nothing is reachable from the LAN: the account
+# endpoints trust the compose network, so exposing them further would leak account data.
+
+x-backend: &backend
+  build:
+    context: .
+    dockerfile: docker/backend.Dockerfile
+  environment:
+    DATABASE_URL: postgresql://traderai:traderai@db:5432/traderai
+    ACCOUNT_TRUSTED_NETWORKS: 172.30.57.0/24
+    AUTOSYNC_MODE: docker
+    TZ: Asia/Ho_Chi_Minh
+  volumes:
+    - ./key.txt:/app/key.txt:ro
+    - ./.env.local:/app/.env.local:ro
+    - ./runtime:/app/runtime
+  depends_on:
+    db:
+      condition: service_healthy
+  networks: [traderai]
+  restart: unless-stopped
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: traderai
+      POSTGRES_PASSWORD: traderai
+      POSTGRES_DB: traderai
+      TZ: Asia/Ho_Chi_Minh
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U traderai -d traderai"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    networks: [traderai]
+    restart: unless-stopped
+
+  backend:
+    <<: *backend
+    ports:
+      - "127.0.0.1:8001:8000"
+
+  scheduler:
+    <<: *backend
+    command: ["python", "autosync.py", "daemon"]
+    profiles: [autosync]
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+    ports:
+      - "127.0.0.1:8080:80"
+    depends_on: [backend]
+    networks: [traderai]
+    restart: unless-stopped
+
+networks:
+  traderai:
+    ipam:
+      config:
+        - subnet: 172.30.57.0/24
+
+volumes:
+  pgdata:

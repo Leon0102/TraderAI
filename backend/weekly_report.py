@@ -7,9 +7,10 @@ the app never disagree. Account numbers never appear (the analysis already masks
 
 import os
 import re
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from typing import Any, Dict, List, Optional
 
+import storage
 import tcbs_account as ta
 
 REPORTS_DIR = os.path.join(ta.RUNTIME_DIR, "reports")
@@ -119,31 +120,18 @@ def build_report(analysis: Dict[str, Any], plan: Dict[str, Any], insights: Optio
 
 
 def save_report(markdown: str, today: Optional[date] = None) -> str:
-    os.makedirs(REPORTS_DIR, exist_ok=True)
     name = week_id(today)
-    path = os.path.join(REPORTS_DIR, f"{name}.md")
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(markdown)
+    storage.write(os.path.join(REPORTS_DIR, f"{name}.md"), {"markdown": markdown})
     return name
 
 
 def list_reports() -> List[Dict[str, Any]]:
-    if not os.path.isdir(REPORTS_DIR):
-        return []
-    out = []
-    for fn in sorted(os.listdir(REPORTS_DIR), reverse=True):
-        if fn.endswith(".md") and _NAME.match(fn[:-3]):
-            st = os.stat(os.path.join(REPORTS_DIR, fn))
-            out.append({"name": fn[:-3], "updated_at": datetime.fromtimestamp(st.st_mtime).isoformat(timespec="minutes")})
-    return out
+    return [{"name": fn[:-3], "updated_at": ts} for fn, ts in storage.list_prefix(REPORTS_DIR)
+            if fn.endswith(".md") and _NAME.match(fn[:-3])]
 
 
 def read_report(name: str) -> Optional[str]:
     if not _NAME.match(name or ""):  # never let a request path escape the reports folder
         return None
-    path = os.path.join(REPORTS_DIR, f"{name}.md")
-    if not os.path.isfile(path):
-        return None
-    with open(path, encoding="utf-8") as f:
-        return f.read()
+    doc = storage.read(os.path.join(REPORTS_DIR, f"{name}.md"))
+    return doc.get("markdown") if isinstance(doc, dict) else None

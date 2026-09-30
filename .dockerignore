@@ -1,0 +1,15 @@
+# Secrets are mounted read-only at runtime, never baked into images.
+key.txt
+.env
+.env.*
+runtime
+node_modules
+dist
+.git
+.github
+.vercel
+.kilo
+.claude
+.playwright-mcp
+**/__pycache__
+*.pyc
