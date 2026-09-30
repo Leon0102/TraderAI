@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional
 
 import storage
 
-BASE_URL = "https://openapi.tcbs.com.vn"
+BASE_URL = os.environ.get("TCBS_BASE_URL", "https://openapi.tcbs.com.vn")  # override only for tests
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RUNTIME_DIR = os.path.join(ROOT, "runtime")
 TOKEN_FILE = os.path.join(RUNTIME_DIR, "tcbs_token.json")
@@ -34,6 +34,7 @@ KEY_FILE = os.path.join(ROOT, "key.txt")
 TOKEN_TTL_FALLBACK = 8 * 3600
 # Profile blocks requested: only what is needed to find sub-accounts, no personal details.
 PROFILE_FIELDS = "basicInfo,bankSubAccounts"
+STOCK_ACCOUNT_TYPES = {"NORMAL", "MARGIN"}
 # Keys holding personal data that must never be stored in the snapshot or sent to an LLM.
 PII_KEYS = {"fullName", "fullNameNoAccent", "custodyID", "custodyCode", "personalInfo",
             "personalBasicInfo", "bankAccounts", "accountName", "email", "phoneNumber",
@@ -172,28 +173,46 @@ def strip_pii(obj: Any) -> Any:
     return obj
 
 
+def _looks_like_custody(value: Optional[str]) -> bool:
+    v = (value or "").strip().upper()
+    return v.startswith("105C") and 8 <= len(v) <= 12 and v[4:].isalnum()
+
+
+def resolve_custody(explicit: Optional[str], cached: Dict[str, Any]) -> str:
+    """The token's own custodyID is authoritative (it names the account the OTP unlocked).
+    TCBS_CUSTODY_CODE is only a fallback, and ignored unless it looks like a custody code —
+    a pasted API key there made the profile call fail with 403."""
+    for candidate in (explicit, cached.get("custody_code"), _custody_from_claims(_jwt_claims(cached.get("token") or "")),
+                      os.environ.get("TCBS_CUSTODY_CODE")):
+        if _looks_like_custody(candidate):
+            return candidate.strip().upper()
+    return ""
+
+
 def sync(custody_code: Optional[str] = None) -> Dict[str, Any]:
     """Pull sub-accounts, holdings, cash, orders and matches; save a PII-free snapshot."""
     cached = load_token()
     if not cached:
         raise TcbsError("Chưa đăng nhập TCBS hoặc token đã hết hạn, cần nhập OTP.", needs_login=True)
     token = cached["token"]
-    custody = (custody_code or os.environ.get("TCBS_CUSTODY_CODE") or cached.get("custody_code") or "").strip().upper()
+    custody = resolve_custody(custody_code, cached)
 
     override = [a.strip() for a in os.environ.get("TCBS_ACCOUNT_NOS", "").split(",") if a.strip()]
     if override:
         sub_accounts = [{"accountNo": a, "accountType": "NORMAL"} for a in override]
     else:
         if not custody:
-            raise TcbsError("Thiếu số lưu ký (105C…). Đặt TCBS_CUSTODY_CODE trong .env.local.")
+            raise TcbsError("Không xác định được số lưu ký (105C…) từ token. Đặt TCBS_CUSTODY_CODE=105C… trong .env.local.")
         profile = _get(f"/eros/v2/get-profile/by-username/{custody}", token, {"fields": PROFILE_FIELDS})
         sub_accounts = [
             {"accountNo": s.get("accountNo"), "accountType": s.get("accountType"),
              "status": s.get("status"), "isDefault": s.get("isDefault")}
             for s in (profile or {}).get("bankSubAccounts") or [] if s.get("accountNo")
         ]
-    # Derivative sub-accounts use a different API family; stock endpoints reject them.
-    stock_accounts = [s for s in sub_accounts if (s.get("accountType") or "").upper() != "DERIVATIVE"]
+    # Only stock sub-accounts answer the stock endpoints: DERIVATIVE uses another API family and
+    # TCBS product sub-accounts such as POWER return 403 "User authorization failed".
+    stock_accounts = [s for s in sub_accounts if (s.get("accountType") or "").upper() in STOCK_ACCOUNT_TYPES]
+    skipped = sorted({(s.get("accountType") or "?").upper() for s in sub_accounts} - STOCK_ACCOUNT_TYPES)
     if not stock_accounts:
         raise TcbsError("Không tìm thấy tiểu khoản cổ phiếu nào.")
 
@@ -220,7 +239,8 @@ def sync(custody_code: Optional[str] = None) -> Dict[str, Any]:
                 errors.append(f"{mask_account(acct)} risk: {e}")
         accounts.append(entry)
 
-    snapshot = {"synced_at": datetime.now().isoformat(timespec="seconds"), "accounts": accounts, "errors": errors}
+    snapshot = {"synced_at": datetime.now().isoformat(timespec="seconds"), "accounts": accounts, "errors": errors,
+                "skipped_account_types": skipped}
     _write_private(SNAPSHOT_FILE, snapshot)
     # TCBS only exposes today's matches, so keep a running journal for realized P&L.
     from portfolio_insights import update_journal

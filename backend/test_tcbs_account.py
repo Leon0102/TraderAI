@@ -114,6 +114,21 @@ def test_login_rejects_bad_otp_without_network():
         del os.environ["TCBS_API_KEY"]
 
 
+def test_custody_prefers_token_and_ignores_bad_env():
+    import base64, json as _json
+    claims = base64.urlsafe_b64encode(_json.dumps({"custodyID": "105C123456"}).encode()).decode().rstrip("=")
+    cached = {"token": f"x.{claims}.y"}
+    os.environ["TCBS_CUSTODY_CODE"] = "1000abcd-" + "0" * 39  # an API key pasted by mistake
+    try:
+        assert ta.resolve_custody(None, cached) == "105C123456"
+        assert ta.resolve_custody(None, {"token": "x.e30.y"}) == "", "a malformed env value is never used"
+        os.environ["TCBS_CUSTODY_CODE"] = "105c654321"
+        assert ta.resolve_custody(None, {"token": "x.e30.y"}) == "105C654321", "valid env value is the fallback"
+        assert ta.resolve_custody("105C999999", cached) == "105C999999", "an explicit argument wins"
+    finally:
+        del os.environ["TCBS_CUSTODY_CODE"]
+
+
 def main():
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

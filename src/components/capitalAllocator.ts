@@ -1,4 +1,5 @@
 // Capital Allocator Component
+import { onAccount } from './accountStore';
 // Takes a VND amount from the user and turns the combined BUY signals into a
 // concrete, tradable position: how many shares (in 100-share lots, the HOSE/
 // HNX minimum) of which tickers, for how much, with how much cash left over.
@@ -39,6 +40,30 @@ export function initCapitalAllocator() {
   btn.addEventListener('click', run);
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') run();
+  });
+
+  // Real TCBS cash as the default capital once the account is connected.
+  onAccount(a => {
+    const presets = document.querySelector('.capital-presets');
+    if (!presets) return;
+    let btn = document.getElementById('capitalPresetTcbs') as HTMLButtonElement | null;
+    if (!btn) {
+      btn = document.createElement('button');
+      btn.id = 'capitalPresetTcbs';
+      btn.className = 'capital-preset capital-preset-tcbs';
+      btn.type = 'button';
+      btn.addEventListener('click', () => {
+        const amount = Number(btn!.dataset.amount);
+        input.value = amount.toLocaleString('vi-VN');
+        renderAllocation(amount);
+      });
+      presets.prepend(btn);
+    }
+    const cash = Math.max(0, Math.round(a.summary.cash));
+    btn.dataset.amount = String(cash);
+    btn.textContent = `Tiền mặt TCBS ${(cash / 1e6).toLocaleString('vi-VN', { maximumFractionDigits: 1 })}tr`;
+    btn.title = `Tiền mặt trong tài khoản TCBS lúc ${a.synced_at}`;
+    if (!input.value) input.value = cash.toLocaleString('vi-VN');
   });
 
   document.querySelectorAll('.capital-preset').forEach(b => {

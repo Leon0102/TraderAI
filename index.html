@@ -118,7 +118,7 @@
           <div class="section-heading">
             <span class="eyebrow">Kỷ luật giao dịch</span>
             <h2 class="section-title">Danh mục ảo &amp; cảnh báo</h2>
-            <p class="section-lede">Theo dõi giá vốn, lãi lỗ và các mốc giá ngay trên thiết bị này. Dữ liệu chưa đồng bộ lên tài khoản.</p>
+            <p class="section-lede" id="portfolioLede">Theo dõi giá vốn, lãi lỗ và các mốc giá ngay trên thiết bị này. Đăng nhập TCBS để vị thế thật tự đồng bộ vào đây.</p>
           </div>
           <button class="btn-ghost" id="portfolioExport" type="button">Xuất CSV</button>
         </div>
@@ -130,12 +130,8 @@
               <p class="tcbs-status" id="tcbsStatus" aria-live="polite">Đang kiểm tra kết nối…</p>
             </div>
             <div class="tcbs-actions">
-              <form id="tcbsLoginForm" class="tcbs-login" hidden>
-                <input id="tcbsOtp" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="Mã OTP" aria-label="Mã OTP TCBS">
-                <button class="btn-ghost" type="submit">Đăng nhập</button>
-              </form>
+              <button class="btn-ghost" id="tcbsLogin" type="button" hidden>Nhập OTP</button>
               <button class="btn-ghost" id="tcbsSync" type="button" hidden>Đồng bộ</button>
-              <button class="btn-ghost" id="tcbsImport" type="button" hidden>Chép vào danh mục ảo</button>
               <button class="btn-ghost" id="tcbsReview" type="button" hidden>AI đánh giá danh mục</button>
             </div>
           </div>

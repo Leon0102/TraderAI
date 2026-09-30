@@ -2,6 +2,7 @@
 // Inspired by TauricResearch/TradingAgents, adapted for Vietnam Stock Market
 
 import { dataSourceStatus, fetchAgentCouncilAnalysis, fetchTopStocks, streamAgentCouncil } from '../api/stockApi';
+import { getAccount, sizingText } from './accountStore';
 import type {
   AgentCouncilContext,
   AgentCouncilEvent,
@@ -709,6 +710,12 @@ function calculateRR(v: AgentCouncilVerdict): string | null {
   return null;
 }
 
+/** "15% tổng tài sản" in money and round lots of the real TCBS NAV, when an account is connected. */
+function sizingInAccount(v: AgentCouncilVerdict): string {
+  const text = sizingText(v.sizing, v.entry_zone, getAccount(), currentCouncilTicker);
+  return text ? `<span class="metric-sub">${escapeHtml(text)}</span>` : '';
+}
+
 function buildVerdictCard(v: AgentCouncilVerdict, raw: string, engine?: string): HTMLElement {
   const card = document.createElement('div');
   card.className = 'verdict-card fade-in';
@@ -761,6 +768,7 @@ function buildVerdictCard(v: AgentCouncilVerdict, raw: string, engine?: string):
       <div class="verdict-metric">
         <span class="metric-label">⚖️ Tỷ Trọng Danh Mục</span>
         <span class="metric-val">${escapeHtml(v.sizing)}</span>
+        ${sizingInAccount(v)}
         ${rrRatio ? `<span class="rr-ratio-pill" title="Tỷ lệ Lợi nhuận / Rủi ro">R/R = ${rrRatio}</span>` : ''}
       </div>
     </div>

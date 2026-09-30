@@ -4810,3 +4810,6 @@ main section[id] { scroll-margin-top: 90px; }
 .dot { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: .4rem; vertical-align: middle; }
 .q-spark { display: grid; gap: .25rem; }
 .q-spark svg { max-width: 100%; }
+.metric-sub { display: block; font-size: .72rem; color: var(--text-muted); margin-top: .2rem; }
+.capital-preset-tcbs { border-color: var(--green-border) !important; color: var(--green-light) !important; }
+.portfolio-table .tcbs-badge { font-size: .6rem; margin-left: .3rem; }

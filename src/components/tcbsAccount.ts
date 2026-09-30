@@ -1,6 +1,7 @@
 // Real TCBS account (read-only). Served by the local backend only (backend/server.py
 // /api/account/*); on the deployed site those routes don't exist and the panel says so.
-import { addAlerts, replaceHoldings } from './portfolio';
+import { addAlerts, syncTcbsHoldings } from './portfolio';
+import { setAccount } from './accountStore';
 import { loadInsights } from './portfolioInsights';
 import { initAccountTabs, loadOverview, type OverviewAnalysis } from './accountOverview';
 import { loadAdvanced, loadTools } from './accountTools';
@@ -72,11 +73,20 @@ function setStatus(text: string, isError = false) {
 }
 
 function showControls(loggedIn: boolean) {
-  $('tcbsLoginForm')!.hidden = loggedIn;
+  $('tcbsLogin')!.hidden = loggedIn;
   $('tcbsSync')!.hidden = !loggedIn;
-  const hasData = Boolean(analysis?.holdings.length);
-  $('tcbsImport')!.hidden = !hasData;
   $('tcbsReview')!.hidden = !analysis;
+}
+
+let publishedKey = '';
+/** Share the snapshot with the rest of the app (virtual portfolio, allocator, council sizing). */
+function publish(a: Analysis) {
+  const key = `${a.synced_at}|${a.holdings.length}`;
+  if (key === publishedKey) return;
+  publishedKey = key;
+  setAccount(a);
+  // the virtual portfolio stores prices in thousand VND, like the rest of the app
+  syncTcbsHoldings(a.holdings.map(h => ({ ticker: h.ticker, quantity: h.quantity, avgPrice: h.avg_cost / 1000, price: h.price / 1000 })));
 }
 
 function render() {
@@ -104,6 +114,7 @@ function render() {
     ${rows ? `<div class="portfolio-table-wrap"><table class="portfolio-table"><thead><tr><th>Mã</th><th>SL</th><th>Giá vốn</th><th>Giá hiện tại</th><th>Giá trị</th><th>Lãi/Lỗ</th><th>Tỷ trọng</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<div class="portfolio-empty">Tài khoản chưa nắm giữ cổ phiếu.</div>'}
     ${trades ? `<p class="form-hint">Khớp lệnh hôm nay: ${trades}</p>` : ''}
     ${analysis.errors.length ? `<p class="form-hint negative">Một số dữ liệu chưa tải được: ${analysis.errors.map(esc).join('; ')}</p>` : ''}`;
+  publish(analysis);
   loadPlan();
   loadInsights(analysis.synced_at, analysis.holdings.map(h => h.ticker));
   loadOverview(analysis as unknown as OverviewAnalysis);
@@ -155,19 +166,26 @@ function openOtpDialog() {
   $<HTMLInputElement>('tcbsOtpDialogInput')?.focus();
 }
 
-async function sync() {
+let syncing = false;
+
+async function sync(background = false) {
+  if (syncing) return;
+  syncing = true;
   const btn = $<HTMLButtonElement>('tcbsSync');
   if (btn) btn.disabled = true;
-  setStatus('Đang tải dữ liệu từ TCBS…');
+  if (!background) setStatus('Đang tải dữ liệu từ TCBS…');
   try {
     analysis = await call<Analysis>('sync', { method: 'POST' });
+    lastSyncAt = Date.now();
     render();
     await refreshStatus();
   } catch (e) {
     const err = e as Error & { needsLogin?: boolean };
-    setStatus(err.message, true);
-    if (err.needsLogin) { showControls(false); openOtpDialog(); }
+    setStatus(err.needsLogin ? 'Phiên TCBS đã hết hạn (token tối đa 8 giờ) — bấm "Nhập OTP" để tiếp tục.' : err.message, true);
+    // A background refresh must not pop the dialog up on its own; the user asked for "OTP once".
+    if (err.needsLogin) { showControls(false); if (!background) openOtpDialog(); }
   } finally {
+    syncing = false;
     if (btn) btn.disabled = false;
   }
 }
@@ -284,12 +302,7 @@ async function loadPlan() {
 
 export function initTcbsAccount() {
   if (!$('tcbsPanel')) return;
-  $('tcbsLoginForm')?.addEventListener('submit', async event => {
-    event.preventDefault();
-    const input = $<HTMLInputElement>('tcbsOtp')!;
-    const error = await loginWithOtp(input.value.trim());
-    if (error) setStatus(error, true); else input.value = '';
-  });
+  $('tcbsLogin')?.addEventListener('click', openOtpDialog);
   const dialog = $<HTMLDialogElement>('tcbsOtpDialog');
   $('tcbsOtpDialogForm')?.addEventListener('submit', async event => {
     event.preventDefault();
@@ -302,18 +315,44 @@ export function initTcbsAccount() {
     if (error) { $('tcbsOtpDialogError')!.textContent = error; input.focus(); } else dialog?.close();
   });
   $('tcbsOtpDialogLater')?.addEventListener('click', () => dialog?.close());
-  $('tcbsSync')?.addEventListener('click', sync);
+  $('tcbsSync')?.addEventListener('click', () => sync());
   $('tcbsReview')?.addEventListener('click', review);
-  $('tcbsImport')?.addEventListener('click', () => {
-    if (!analysis?.holdings.length) return;
-    if (!confirm('Thay toàn bộ danh mục ảo bằng danh mục thật từ TCBS?')) return;
-    // The virtual portfolio stores prices in thousand VND, like the rest of the app.
-    replaceHoldings(analysis.holdings.map(h => ({ ticker: h.ticker, quantity: h.quantity, avgPrice: h.avg_cost / 1000 })));
-  });
-  // Ask for the OTP up front: a still-valid token syncs straight away, otherwise prompt.
+  // Ask for the OTP once, up front: a still-valid token (up to 8h) syncs straight away, otherwise
+  // prompt. After that the account refreshes on its own while the token lasts.
   initAccountTabs();
   refreshStatus().then(st => {
     if (!st?.configured) return;
     if (st.logged_in) sync(); else openOtpDialog();
+    startAutoRefresh();
   });
+}
+
+const REFRESH_MS = 5 * 60_000;
+let lastSyncAt = 0;
+let autoTimer: number | undefined;
+
+function inTradingHours(d = new Date()): boolean {
+  const vn = new Date(d.toLocaleString('en-US', { timeZone: 'Asia/Ho_Chi_Minh' }));
+  const minutes = vn.getHours() * 60 + vn.getMinutes();
+  return vn.getDay() >= 1 && vn.getDay() <= 5 && minutes >= 9 * 60 && minutes <= 15 * 60 + 5;
+}
+
+/** Re-sync every 5 minutes during trading hours and when the tab comes back after a while. */
+function startAutoRefresh() {
+  const tick = async (force = false) => {
+    if (document.hidden || syncing) return;
+    try {
+      // The token check is a cheap local call; only the TCBS sync is throttled to every 5 minutes.
+      const st = await call<Status>('status');
+      if (st.logged_in) {
+        if ((force || inTradingHours()) && Date.now() - lastSyncAt >= REFRESH_MS) await sync(true);
+      } else if (analysis) {  // token ran out: say so, keep showing the last data, no pop-up
+        showControls(false);
+        setStatus('Phiên TCBS đã hết hạn (token tối đa 8 giờ) — đang hiển thị dữ liệu lần đồng bộ trước. Bấm "Nhập OTP" để cập nhật.', true);
+      }
+    } catch { /* offline: ignore */ }
+  };
+  window.clearInterval(autoTimer);
+  autoTimer = window.setInterval(() => tick(), 60_000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(true); });
 }
