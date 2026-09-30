@@ -50,8 +50,12 @@ const time = (iso: string | null) => (iso ? new Date(iso).toLocaleString('vi-VN'
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api/account/${path}`, { headers: { 'Content-Type': 'application/json' }, ...init });
-  if (res.status === 404 && path === 'status') throw new Error('offline');
+  // Only the local backend serves /api/account/*. On the deployed site the SPA fallback answers
+  // with index.html (HTTP 200), so anything that is not the backend's JSON means "offline".
+  const isJson = (res.headers.get('content-type') || '').includes('application/json');
+  if (path === 'status' && (!res.ok || !isJson)) throw new Error('offline');
   const body = await res.json().catch(() => ({}));
+  if (path === 'status' && typeof body?.configured !== 'boolean') throw new Error('offline');
   if (!res.ok) {
     const detail = body?.detail;
     const err = new Error(typeof detail === 'string' ? detail : detail?.message || `HTTP ${res.status}`) as Error & { needsLogin?: boolean };
@@ -123,7 +127,7 @@ async function refreshStatus(): Promise<Status | null> {
     $('tcbsPanel')?.classList.add('tcbs-offline');
     const tabs = $('accTabs');
     if (tabs) tabs.hidden = true;
-    setStatus('Chỉ khả dụng khi chạy backend trên máy local (python3 backend/server.py).');
+    setStatus('Tài khoản TCBS chỉ chạy trên máy của bạn (npm run local). Bản online không giữ API key để bảo vệ tài khoản.');
     return null;
   }
 }
