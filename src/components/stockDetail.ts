@@ -2,6 +2,7 @@
 // Shows detailed analysis when clicking on a stock ticker
 
 import type { TechnicalSignal } from '../analysis/technicalAnalysis';
+import { renderStockQuantCard } from './quantPanel';
 import type { FundamentalSignal } from '../analysis/fundamentalAnalysis';
 import type { NewsSignal } from '../analysis/newsAnalysis';
 import type { PriceZoneResult } from '../analysis/priceZoneAnalysis';
@@ -91,6 +92,11 @@ async function loadDetailData(ticker: string) {
     const priceZones = analyzePriceZones(technical, fundamental, newsSignal, bars);
 
     body.innerHTML = renderDetailContent(ticker, technical, fundamental, bars, newsSignal, priceZones, newsData?.articles || []);
+    // Validated factor grades from the local market database (absent on the deployed site).
+    const quant = document.createElement('div');
+    quant.className = 'detail-quant';
+    body.prepend(quant);
+    renderStockQuantCard(ticker, quant);
   } catch (err) {
     body.innerHTML = `<div class="detail-error">Không thể tải dữ liệu cho ${ticker}</div>`;
   }
@@ -208,6 +214,7 @@ function renderDetailContent(
       <!-- Technical Analysis -->
       <div class="detail-col">
         <h3>⚡ Phân tích Kỹ thuật (Ngắn hạn)</h3>
+        <p class="form-hint">Tổng hợp tín hiệu chỉ báo — chỉ để tham khảo: kiểu chấm điểm này chưa có bằng chứng hiệu quả khi kiểm định trên TTCK Việt Nam.</p>
         <div class="detail-signal ${tech.signal === 'BUY' ? 'signal-buy' : tech.signal === 'SELL' ? 'signal-sell' : 'signal-hold'}">
           ${tech.signal === 'BUY' ? '🟢 MUA' : tech.signal === 'SELL' ? '🔴 BÁN' : '🟡 GIỮ'}
           <span class="signal-strength">${tech.strength}%</span>

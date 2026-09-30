@@ -520,6 +520,97 @@ def api_account_notify_test(request: Request):
     return notify.deliver([{"id": "test", "text": "✅ TraderAI: thông báo thử nghiệm hoạt động."}])
 
 
+# ==========================================
+# Quant: market database, scores, validation, market views
+# ==========================================
+import threading as _threading  # noqa: E402
+
+import quant_service  # noqa: E402
+import market_views  # noqa: E402
+
+_market_cache: dict = {}
+
+
+@app.get("/api/quant/status")
+def api_quant_status():
+    return quant_service.status()
+
+
+@app.post("/api/quant/ingest")
+def api_quant_ingest(request: Request, quick: bool = Query(default=False)):
+    _require_local(request)  # heavy job: only from this machine
+    if quant_service.status().get("running"):
+        return {"started": False, "message": "Đang chạy."}
+    _threading.Thread(target=quant_service.run_pipeline, kwargs={"quick": quick}, daemon=True).start()
+    _market_cache.clear()
+    return {"started": True}
+
+
+def _need_data():
+    if not quant_service.available():
+        raise HTTPException(status_code=404, detail={"message": "Chưa có dữ liệu thị trường — bấm 'Nạp dữ liệu'.", "needs_login": False})
+
+
+@app.get("/api/quant/screener")
+def api_quant_screener(sector: Optional[str] = None, grade: Optional[str] = Query(default=None, pattern="^[A-F]$"),
+                       limit: int = Query(default=100, ge=1, le=400)):
+    _need_data()
+    return quant_service.screener(sector, grade, limit)
+
+
+@app.get("/api/quant/stock/{ticker}")
+def api_quant_stock(ticker: str):
+    _need_data()
+    try:
+        validate_ticker(ticker)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    card = quant_service.stock_card(ticker)
+    if not card:
+        raise HTTPException(status_code=404, detail={"message": "Mã này chưa đủ thanh khoản hoặc chưa có BCTC để chấm điểm.", "needs_login": False})
+    return card
+
+
+@app.get("/api/quant/validation")
+def api_quant_validation():
+    _need_data()
+    v = quant_service.validation_summary()
+    if not v:
+        raise HTTPException(status_code=404, detail={"message": "Chưa chạy kiểm định.", "needs_login": False})
+    return v
+
+
+@app.get("/api/quant/market")
+def api_quant_market():
+    _need_data()
+    import time as _time
+    hit = _market_cache.get("views")
+    if not hit or _time.time() - hit[0] > 600:
+        _market_cache["views"] = (_time.time(), market_views.all_views())
+    return _market_cache["views"][1]
+
+
+@app.get("/api/account/factors")
+def api_account_factors(request: Request):
+    _require_local(request)
+    _need_data()
+    analysis = _analysis_or_404()
+    nav = nav_history.metrics(nav_history.load(), [])
+    return quant_service.portfolio_regression(analysis["holdings"], nav.get("points", []))
+
+
+@app.get("/api/account/grades")
+def api_account_grades(request: Request):
+    _require_local(request)
+    _need_data()
+    analysis = _analysis_or_404()
+    out = []
+    for h in analysis["holdings"]:
+        card = quant_service.stock_card(h["ticker"])
+        out.append({"ticker": h["ticker"], "weight_pct": h["weight_pct"], "card": card})
+    return {"holdings": out}
+
+
 @app.post("/api/account/review")
 def api_account_review(req: PortfolioReviewRequest, request: Request):
     _require_local(request)

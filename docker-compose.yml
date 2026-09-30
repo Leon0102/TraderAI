@@ -1,6 +1,9 @@
 # Local stack: Postgres + FastAPI backend + nginx-served frontend (+ optional scheduler).
 #   docker compose up -d --build              -> http://localhost:8080
-#   docker compose --profile autosync up -d   -> also run the weekday auto-sync job
+#   docker compose --profile autosync up -d   -> also run the weekday scheduler (account sync
+#                                               11:35/15:05, market ingest + validation 15:30)
+# First run: open the "Định lượng" section -> "Dữ liệu" -> "Nạp dữ liệu" (~2 minutes) to load
+# every HOSE/HNX/UPCoM ticker into Postgres.
 # Every port is bound to 127.0.0.1 so nothing is reachable from the LAN: the account
 # endpoints trust the compose network, so exposing them further would leak account data.
 

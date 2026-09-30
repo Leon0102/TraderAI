@@ -4776,3 +4776,34 @@ main section[id] { scroll-margin-top: 90px; }
   .pt-form label.wide { grid-column: 1 / -1; }
 }
 .acc-card > .plan-action { justify-self: start; }
+
+/* Quant section */
+.section-quant .acc-tabs { margin-top: 1rem; }
+.quant-grid { grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); }
+.q-chart { height: 220px; width: 100%; }
+.rrg { width: 100%; height: auto; max-height: 420px; background: var(--bg-primary); border-radius: 10px; }
+.rrg-axis { stroke: var(--line-strong); stroke-dasharray: 4 4; }
+.rrg-label { fill: var(--text-secondary); font-size: 10px; }
+.rrg-q { fill: var(--text-muted); font-size: 10px; letter-spacing: .08em; }
+.rrg-legend { display: flex; flex-wrap: wrap; gap: .3rem; }
+.flow-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+.flow-list { list-style: none; margin: .3rem 0 0; padding: 0; display: grid; gap: .25rem; font-size: .8rem; }
+.flow-list li { display: flex; justify-content: space-between; font-family: var(--font-mono); }
+.grade { display: inline-grid; place-items: center; min-width: 1.6rem; height: 1.4rem; border-radius: 6px; font-weight: 700; font-size: .78rem; border: 1px solid var(--line-strong); color: var(--text-secondary); }
+.grade-A, .grade-B { color: var(--green-light); border-color: var(--green-border); background: var(--green-bg); }
+.grade-C { color: var(--yellow); border-color: var(--yellow); background: var(--yellow-bg); }
+.grade-D, .grade-F { color: var(--red-light); border-color: var(--red-border); background: var(--red-bg); }
+.q-table td { padding: .5rem .6rem !important; }
+.q-sector { max-width: 11rem; overflow: hidden; text-overflow: ellipsis; color: var(--text-secondary); font-size: .78rem; }
+.q-card-head { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+.q-groups { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .5rem; }
+.q-groups > div { display: grid; justify-items: start; gap: .2rem; font-size: .76rem; color: var(--text-secondary); }
+.q-groups small { color: var(--text-muted); }
+.q-dcf { border-top: 1px solid var(--line); padding-top: .5rem; }
+.detail-quant { margin-bottom: 1rem; }
+.acc-dl dt .plan-action { margin-left: .3rem; font-size: .62rem; }
+@media (max-width: 760px) {
+  .quant-grid { grid-template-columns: minmax(0, 1fr); }
+  .q-groups { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .flow-cols { grid-template-columns: 1fr; }
+}

@@ -42,6 +42,7 @@
           <a href="#agentCouncilSection" class="nav-link" data-section="council">Hội Đồng AI</a>
           <a href="#suggestions" class="nav-link" data-section="suggestions">Gợi Ý</a>
           <a href="#portfolio" class="nav-link" data-section="portfolio">Danh Mục</a>
+          <a href="#quant" class="nav-link" data-section="quant" hidden>Định Lượng</a>
           <a href="#chart" class="nav-link" data-section="chart">Biểu Đồ</a>
         </nav>
         <div class="header-right">
@@ -165,6 +166,7 @@
         <div id="tcbsReviewOut" class="tcbs-review" data-acc-tab="overview" hidden></div>
           <div id="tcbsPlan" class="tcbs-plan" data-acc-tab="plan" hidden></div>
         <div id="accAdvanced" class="tcbs-plan" data-acc-tab="risk" hidden></div>
+        <div id="accQuant" class="tcbs-plan" data-acc-tab="analysis" hidden></div>
         <div id="accTools" class="tcbs-plan" data-acc-tab="tools" hidden></div>
         <div id="tcbsInsights" class="tcbs-plan" hidden></div>
         </div>
@@ -190,6 +192,28 @@
         <div id="alertStatus" class="alert-status" aria-live="polite"></div>
         <div id="portfolioContent" class="portfolio-content"></div>
         <div id="alertList" class="alert-list"></div>
+      </div>
+    </section>
+
+    <section class="section section-quant" id="quant" hidden>
+      <div class="container">
+        <div class="section-header">
+          <div class="section-heading">
+            <span class="eyebrow">Có kiểm định</span>
+            <h2 class="section-title">Định lượng: thị trường, chấm điểm &amp; kiểm định</h2>
+            <p class="section-lede">Toàn bộ HOSE/HNX/UPCoM từ cơ sở dữ liệu local. Mọi điểm số đều được kiểm tra walk-forward trên dữ liệu Việt Nam — tiêu chí nào không thắng thị trường sẽ được ghi rõ.</p>
+          </div>
+        </div>
+        <nav class="acc-tabs" role="tablist" aria-label="Các mục định lượng">
+          <button type="button" role="tab" data-qtab-btn="market">Thị trường</button>
+          <button type="button" role="tab" data-qtab-btn="screener">Bộ lọc & chấm điểm</button>
+          <button type="button" role="tab" data-qtab-btn="validation">Kiểm định</button>
+          <button type="button" role="tab" data-qtab-btn="data">Dữ liệu</button>
+        </nav>
+        <div class="tcbs-plan" data-qtab="market" id="qMarket"></div>
+        <div class="tcbs-plan" data-qtab="screener" id="qScreener" hidden></div>
+        <div class="tcbs-plan" data-qtab="validation" id="qValidation" hidden></div>
+        <div class="tcbs-plan" data-qtab="data" id="qStatus" hidden></div>
       </div>
     </section>
 

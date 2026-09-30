@@ -8,6 +8,15 @@ from typing import Dict, Any, Generator, Optional
 from datetime import datetime
 
 from .tools import get_stock_context
+
+
+def quant_brief(ticker: str) -> Optional[str]:
+    """Structured factor grades from the local market database, when it has been ingested."""
+    try:
+        import quant_service
+        return quant_service.brief_for_llm(ticker) if quant_service.available() else None
+    except Exception:
+        return None
 from .prompts import (
     TECHNICAL_ANALYST_PROMPT,
     FUNDAMENTAL_ANALYST_PROMPT,
@@ -169,6 +178,9 @@ class AgentCouncil:
             f"Vốn hóa: {_fmt(fund.get('market_cap'))} tỷ VNĐ, Tỷ suất cổ tức: {fund.get('dividend_yield')}%\n"
             f"Sự kiện doanh nghiệp & Cổ tức/GDKHQ: {events_str}."
         )
+        quant = quant_brief(ticker)
+        if quant:
+            fund_prompt += f"\n=== Điểm định lượng có kiểm định ===\n{quant}"
         fund_report = yield from self._agent_events(
             "fundamental", "Chuyên viên Cơ bản (Fundamental Analyst)", FUNDAMENTAL_ANALYST_PROMPT, fund_prompt, context
         )

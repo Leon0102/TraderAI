@@ -4,6 +4,7 @@ import { addAlerts, replaceHoldings } from './portfolio';
 import { loadInsights } from './portfolioInsights';
 import { initAccountTabs, loadOverview, type OverviewAnalysis } from './accountOverview';
 import { loadAdvanced, loadTools } from './accountTools';
+import { loadAccountQuant } from './quantPanel';
 
 type Holding = { ticker: string; quantity: number; sellable: number; pending: number; avg_cost: number; price: number; market_value: number; pnl: number; pnl_pct: number; weight_pct: number };
 type Analysis = {
@@ -106,7 +107,7 @@ function render() {
   loadPlan();
   loadInsights(analysis.synced_at, analysis.holdings.map(h => h.ticker));
   loadOverview(analysis as unknown as OverviewAnalysis);
-  if (analysis.holdings.length) loadAdvanced(analysis.synced_at);
+  if (analysis.holdings.length) { loadAdvanced(analysis.synced_at); loadAccountQuant(analysis.synced_at); }
   loadTools(analysis.synced_at);
   box.querySelectorAll<HTMLElement>('[data-tcbs-council]').forEach(btn => btn.addEventListener('click', () => window.openCouncilForTicker?.(btn.dataset.tcbsCouncil!)));
 }

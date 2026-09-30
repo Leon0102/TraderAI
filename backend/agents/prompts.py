@@ -31,6 +31,8 @@ Hãy đưa ra phân tích súc tích (3-4 gạch đầu dòng):
 2. Sức khỏe tài chính: Hiệu quả sử dụng vốn (ROE), biên lợi nhuận và mức độ an toàn nợ vay.
 3. Cổ tức & Sự kiện doanh nghiệp: Tỷ suất cổ tức và các sự kiện đáng chú ý (GDKHQ, ĐHĐCĐ, tăng vốn nếu có).
 4. Đánh giá cơ bản tổng quát: Xuất sắc, Đạt chuẩn, hay Kém.
+
+Nếu có mục "Điểm định lượng có kiểm định": ưu tiên các yếu tố được ghi "có bằng chứng" (đã thắng thị trường khi kiểm định walk-forward trên TTCK Việt Nam) và nói rõ khi một luận điểm dựa trên yếu tố "không hiệu quả". Tôn trọng cờ đỏ hạ bậc.
 """
 
 SENTIMENT_ANALYST_PROMPT = """Bạn là Chuyên viên Phân tích Tâm lý & Dòng tiền Thị trường (Sentiment & Flow Analyst) tại TTCK Việt Nam.

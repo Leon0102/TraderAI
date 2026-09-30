@@ -24,6 +24,7 @@ LABEL = "vn.traderai.autosync"
 PLIST = os.path.expanduser(f"~/Library/LaunchAgents/{LABEL}.plist")
 LOG = os.path.join(ta.RUNTIME_DIR, "autosync.log")
 TIMES = ((11, 35), (15, 5))
+INGEST_TIME = (15, 30)  # after the close: refresh the market database and re-run validation
 
 
 def run() -> int:
@@ -76,15 +77,19 @@ def daemon() -> None:
     import time as _time
 
     last_run = None
-    print(f"autosync daemon: {', '.join(f'{h:02d}:{m:02d}' for h, m in TIMES)} Mon–Fri", flush=True)
+    print(f"autosync daemon: sync {', '.join(f'{h:02d}:{m:02d}' for h, m in TIMES)}, market ingest {INGEST_TIME[0]:02d}:{INGEST_TIME[1]:02d}, Mon–Fri", flush=True)
     while True:
         now = datetime.now()
         ta._write_private(_heartbeat_path(), {"at": now.isoformat(timespec="seconds")})
         slot = (now.date(), now.hour, now.minute)
-        if now.weekday() < 5 and (now.hour, now.minute) in TIMES and slot != last_run:
+        if now.weekday() < 5 and (now.hour, now.minute) in TIMES + (INGEST_TIME,) and slot != last_run:
             last_run = slot
             try:
-                run()
+                if (now.hour, now.minute) == INGEST_TIME:
+                    import quant_service
+                    print(f"{now.isoformat(timespec='seconds')} market ingest {quant_service.run_pipeline()}", flush=True)
+                else:
+                    run()
             except Exception as e:  # keep the scheduler alive; the next slot retries
                 print(f"{now.isoformat(timespec='seconds')} run failed: {e!r}", flush=True)
         _time.sleep(60 - datetime.now().second + 1)

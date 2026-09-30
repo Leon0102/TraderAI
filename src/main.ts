@@ -24,6 +24,7 @@ import { renderFeedMeta } from './components/provenance';
 import { setCurrentRecommendations } from './analysis/recommendation';
 import { initPortfolio, setPortfolioPrices } from './components/portfolio';
 import { initTcbsAccount } from './components/tcbsAccount';
+import { initQuantPanel } from './components/quantPanel';
 import type { TechnicalSignal } from './analysis/technicalAnalysis';
 import type { FundamentalSignal } from './analysis/fundamentalAnalysis';
 
@@ -280,6 +281,7 @@ async function init() {
   initDailyPicks();
   initPortfolio();
   initTcbsAccount();
+  initQuantPanel();
   // Login only exists on the deployed site (Vercel middleware), not the local dev server
   const logoutLink = document.getElementById('logoutLink');
   if (logoutLink && !['localhost', '127.0.0.1'].includes(location.hostname)) logoutLink.hidden = false;
